@@ -22,16 +22,15 @@ function AdminRoute() {
 
   useEffect(() => {
     let mounted = true
-    Promise.resolve().then(() => {
-      if (!mounted) return
+    ;(async () => {
       try {
-        const session = getAdminSession()
-        const val = (session as any)
-        setAdminLoggedIn(val?.isLoggedIn === true)
+        const session = await getAdminSession()
+        if (!mounted) return
+        setAdminLoggedIn(session?.isLoggedIn === true)
       } catch {
         if (mounted) setAdminLoggedIn(false)
       }
-    })
+    })()
     return () => { mounted = false }
   }, [])
 
