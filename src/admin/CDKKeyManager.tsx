@@ -60,8 +60,9 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     setCreateSuccess('')
     if (workspaces.length > 0) {
       const defaultWs = workspaces.find(x => x.name === 'Default Workspace') || workspaces[0]
-      setNewKeyWs(defaultWs.workspaceId)
-      setBulkWsId(defaultWs.workspaceId)
+      // Only pre-fill if user hasn't picked one yet, so their previous choice is preserved
+      setNewKeyWs(prev => prev || defaultWs.workspaceId)
+      setBulkWsId(prev => prev || defaultWs.workspaceId)
     }
     setShowCreate('single')
   }
