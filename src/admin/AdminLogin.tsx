@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { ShieldCheck, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
-import { ADMIN_CREDENTIALS } from './types'
-import { setAdminSession } from './db'
+import { loginAdmin, setAdminSession } from './db'
 
 interface AdminLoginProps {
   onLogin: () => void
@@ -21,10 +20,8 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
 
     await new Promise(r => setTimeout(r, 600))
 
-    if (
-      username.trim() === ADMIN_CREDENTIALS.username &&
-      password === ADMIN_CREDENTIALS.password
-    ) {
+    const ok = await loginAdmin(username, password)
+    if (ok) {
       await setAdminSession({
         isLoggedIn: true,
         username: username.trim(),

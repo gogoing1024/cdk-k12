@@ -1,103 +1,84 @@
-import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { CDKKey, Workspace, AdminSession } from './types'
-import { DEFAULT_WORKSPACE_ID } from './types'
 
-interface CDKDB extends DBSchema {
-  keys: {
-    key: string
-    value: CDKKey
-    indexes: { 'by-status': string; 'by-createdAt': number }
-  }
-  workspaces: {
-    key: string
-    value: Workspace
-    indexes: { 'by-isDefault': number }
-  }
-  session: {
-    key: string
-    value: AdminSession
-  }
+const ADMIN_TOKEN_KEY = 'cdk_admin_token_v1'
+
+function getAdminToken(): string {
+  if (typeof localStorage === 'undefined') return ''
+  return localStorage.getItem(ADMIN_TOKEN_KEY) || ''
 }
 
-const DB_NAME = 'cdk-k12-db'
-const DB_VERSION = 1
+function adminHeaders(): Record<string, string> {
+  const token = getAdminToken()
+  return token ? { 'x-admin-token': token } : {}
+}
 
-let _db: IDBPDatabase<CDKDB> | null = null
-let _dbPromise: Promise<IDBPDatabase<CDKDB>> | null = null
+async function apiGet(action: string, params: Record<string, string> = {}): Promise<any> {
+  const qs = new URLSearchParams({ action, ...params }).toString()
+  const res = await fetch(`/api/keys?${qs}`, { headers: adminHeaders() })
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try {
+      const j = await res.json()
+      msg = j?.error?.message || msg
+    } catch {}
+    throw new Error(msg)
+  }
+  return res.json()
+}
 
-export function getDB(): Promise<IDBPDatabase<CDKDB>> {
-  if (_db) return Promise.resolve(_db)
-  if (_dbPromise) return _dbPromise
-  _dbPromise = openDB<CDKDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains('keys')) {
-        const keyStore = db.createObjectStore('keys', { keyPath: 'id' })
-        keyStore.createIndex('by-status', 'status')
-        keyStore.createIndex('by-createdAt', 'createdAt')
-      }
-      if (!db.objectStoreNames.contains('workspaces')) {
-        const wsStore = db.createObjectStore('workspaces', { keyPath: 'id' })
-        wsStore.createIndex('by-isDefault', 'isDefault')
-      }
-      if (!db.objectStoreNames.contains('session')) {
-        db.createObjectStore('session', { keyPath: 'key' })
-      }
-    },
-  }).then(db => {
-    _db = db
-    return db
-  }).catch(err => {
-    _dbPromise = null
-    throw err
+async function apiSend(method: string, action: string, body: any): Promise<any> {
+  const res = await fetch(`/api/keys?action=${action}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+    body: body ? JSON.stringify(body) : undefined,
   })
-  return _dbPromise
-}
-
-// Kick off DB initialization early to avoid race conditions on F5
-if (typeof window !== 'undefined') {
-  getDB().catch(() => { /* ignore */ })
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try {
+      const j = await res.json()
+      msg = j?.error?.message || msg
+    } catch {}
+    throw new Error(msg)
+  }
+  return res.json()
 }
 
 // ==================== CDK Keys ====================
 
 export async function getCDKKeys(): Promise<CDKKey[]> {
-  const db = await getDB()
-  const all = await db.getAll('keys')
-  return all.sort((a, b) => b.createdAt - a.createdAt)
+  const j = await apiGet('list')
+  return j.keys || []
 }
 
 export async function setCDKKeys(keys: CDKKey[]): Promise<void> {
-  const db = await getDB()
-  const tx = db.transaction('keys', 'readwrite')
-  await tx.store.clear()
-  for (const k of keys) {
-    await tx.store.put(k)
-  }
-  await tx.done
+  await apiSend('POST', 'replace-all', { keys })
 }
 
 export async function addCDKKey(key: CDKKey): Promise<void> {
-  const db = await getDB()
-  await db.put('keys', key)
+  await apiSend('POST', 'add', { key })
 }
 
-export async function updateCDKKey(id: string, updates: Partial<CDKKey>): Promise<void> {
-  const db = await getDB()
-  const existing = await db.get('keys', id)
-  if (existing) {
-    await db.put('keys', { ...existing, ...updates })
-  }
+export async function updateCDKKey(id: string, updates: Partial<CDKKey>): Promise<CDKKey> {
+  const all = await getCDKKeys()
+  const existing = all.find(k => k.id === id)
+  if (!existing) throw new Error('Key not found')
+  const merged = { ...existing, ...updates }
+  const j = await apiSend('PUT', 'update', { key: merged })
+  return j.key
 }
 
 export async function deleteCDKKey(id: string): Promise<void> {
-  const db = await getDB()
-  await db.delete('keys', id)
+  await apiSend('DELETE', 'delete', { id })
 }
 
 export async function getCDKKeyByKey(key: string): Promise<CDKKey | undefined> {
-  const db = await getDB()
-  const all = await db.getAll('keys')
-  return all.find(k => k.key.toLowerCase() === key.toLowerCase())
+  try {
+    const j = await apiGet('lookup', { key })
+    return j.key
+  } catch (err: any) {
+    if (String(err?.message || '').toLowerCase().includes('not found')) return undefined
+    throw err
+  }
 }
 
 export async function checkCDKKeyStatus(key: string): Promise<CDKKey | undefined> {
@@ -105,97 +86,48 @@ export async function checkCDKKeyStatus(key: string): Promise<CDKKey | undefined
 }
 
 export async function markCDKKeyUsed(key: string, email: string): Promise<void> {
-  const db = await getDB()
-  const all = await db.getAll('keys')
-  const idx = all.findIndex(k => k.key.toLowerCase() === key.toLowerCase())
-  if (idx !== -1) {
-    const record = all[idx]
-    await db.put('keys', {
-      ...record,
-      status: 'used',
-      activatedAt: Date.now(),
-      activatedEmail: email,
-    })
-  }
+  await apiSend('POST', 'use', { key, email })
 }
 
 // ==================== Workspaces ====================
 
 export async function getWorkspaces(): Promise<Workspace[]> {
-  const db = await getDB()
-  const all = await db.getAll('workspaces')
-  if (all.length === 0) {
-    const defaultWs: Workspace = {
-      id: crypto.randomUUID(),
-      name: 'Default Workspace',
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      isDefault: true,
-      createdAt: Date.now(),
-    }
-    await db.put('workspaces', defaultWs)
-    return [defaultWs]
-  }
-  return all
+  const j = await apiGet('ws:list')
+  return j.workspaces || []
 }
 
 export async function setWorkspaces(workspaces: Workspace[]): Promise<void> {
-  const db = await getDB()
-  const tx = db.transaction('workspaces', 'readwrite')
-  await tx.store.clear()
-  for (const w of workspaces) {
-    await tx.store.put(w)
-  }
-  await tx.done
+  await apiSend('POST', 'ws:replace-all', { workspaces })
 }
 
 export async function addWorkspace(ws: Workspace): Promise<void> {
-  const db = await getDB()
-  await db.put('workspaces', ws)
+  const list = await getWorkspaces()
+  await setWorkspaces([...list, ws])
 }
 
-export async function updateWorkspace(id: string, updates: Partial<Workspace>): Promise<void> {
-  const db = await getDB()
-  const existing = await db.get('workspaces', id)
-  if (existing) {
-    await db.put('workspaces', { ...existing, ...updates })
-  }
+export async function updateWorkspace(id: string, updates: Partial<Workspace>): Promise<Workspace | null> {
+  const list = await getWorkspaces()
+  const next = list.map(w => (w.id === id ? { ...w, ...updates } : w))
+  await setWorkspaces(next)
+  return next.find(w => w.id === id) || null
 }
 
 export async function deleteWorkspace(id: string): Promise<void> {
-  const db = await getDB()
-  const all = await db.getAll('workspaces')
-  const filtered = all.filter(w => w.id !== id)
-  if (filtered.length === 0) {
-    filtered.push({
-      id: crypto.randomUUID(),
-      name: 'Default Workspace',
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      isDefault: true,
-      createdAt: Date.now(),
-    })
-  }
-  await setWorkspaces(filtered)
-}
-
-export async function getDefaultWorkspace(): Promise<Workspace | undefined> {
-  const all = await getWorkspaces()
-  return all.find(w => w.isDefault)
+  const list = await getWorkspaces()
+  const next = list.filter(w => w.id !== id)
+  await setWorkspaces(next)
 }
 
 // ==================== Admin Session ====================
 
-const SESSION_KEY = 'admin_session'
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const SESSION_KEY = 'cdk_admin_session_v1'
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 export async function getAdminSession(): Promise<AdminSession> {
   try {
-    const db = await getDB()
-    const val = await db.get('session', SESSION_KEY)
-    const session = (val as AdminSession | undefined) ?? null
-    if (!session) {
-      return { isLoggedIn: false, username: '', loginAt: 0 }
-    }
-    if (!session.isLoggedIn || !session.loginAt) {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SESSION_KEY) : null
+    const session = raw ? (JSON.parse(raw) as AdminSession) : null
+    if (!session || !session.isLoggedIn || !session.loginAt) {
       return { isLoggedIn: false, username: '', loginAt: 0 }
     }
     if (Date.now() - session.loginAt > SESSION_TTL_MS) {
@@ -209,15 +141,36 @@ export async function getAdminSession(): Promise<AdminSession> {
 }
 
 export async function setAdminSession(session: AdminSession): Promise<void> {
-  const db = await getDB()
-  await db.put('session', { ...session, key: SESSION_KEY } as any)
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+  }
 }
 
 export async function clearAdminSession(): Promise<void> {
-  try {
-    const db = await getDB()
-    await db.delete('session', SESSION_KEY)
-  } catch {
-    /* noop */
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(SESSION_KEY)
   }
+}
+
+// ==================== Admin Login ====================
+
+const ADMIN_USERNAME = 'tandu05'
+const ADMIN_PASSWORD = 'Tandu1710@'
+const BACKEND_ADMIN_TOKEN = 'tandu05-secure-2026'
+
+export async function loginAdmin(username: string, password: string): Promise<boolean> {
+  if (username.trim() === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(ADMIN_TOKEN_KEY, BACKEND_ADMIN_TOKEN)
+    }
+    return true
+  }
+  return false
+}
+
+export async function logoutAdmin(): Promise<void> {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(ADMIN_TOKEN_KEY)
+  }
+  await clearAdminSession()
 }

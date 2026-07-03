@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { ShieldCheck, KeyRound, Server, LogOut, Activity } from 'lucide-react'
 import CDKKeyManager from './CDKKeyManager'
 import WorkspaceManager from './WorkspaceManager'
-import { clearAdminSession, getCDKKeys, getWorkspaces } from './db'
+import { getCDKKeys, getWorkspaces, logoutAdmin } from './db'
 
 interface AdminDashboardProps {
   lang: 'vi' | 'en'
@@ -91,7 +91,7 @@ export default function AdminDashboard({ lang, onLogout }: AdminDashboardProps) 
 
               <button
                 onClick={async () => {
-                  await clearAdminSession()
+                  await logoutAdmin()
                   onLogout()
                 }}
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#22253a] border border-[#2a2d3a] text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-all"
