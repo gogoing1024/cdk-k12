@@ -18,13 +18,30 @@ export type SessionData = {
 }
 
 function AdminRoute() {
-  const [adminLoggedIn, setAdminLoggedIn] = useState(false)
+  const [adminLoggedIn, setAdminLoggedIn] = useState<boolean | null>(null)
 
   useEffect(() => {
-    getAdminSession().then(session => {
-      setAdminLoggedIn(session.isLoggedIn)
+    let mounted = true
+    Promise.resolve().then(() => {
+      if (!mounted) return
+      try {
+        const session = getAdminSession()
+        const val = (session as any)
+        setAdminLoggedIn(val?.isLoggedIn === true)
+      } catch {
+        if (mounted) setAdminLoggedIn(false)
+      }
     })
+    return () => { mounted = false }
   }, [])
+
+  if (adminLoggedIn === null) {
+    return (
+      <div className="min-h-screen bg-[#0f1117] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />
+      </div>
+    )
+  }
 
   if (!adminLoggedIn) {
     return <AdminLogin onLogin={() => setAdminLoggedIn(true)} />
@@ -32,7 +49,9 @@ function AdminRoute() {
   return (
     <AdminDashboard
       lang="vi"
-      onLogout={() => { window.location.href = '/' }}
+      onLogout={() => {
+        try { (window.location as any).href = '/' } catch { /* noop */ }
+      }}
     />
   )
 }
@@ -121,8 +140,20 @@ function MainApp() {
   )
 }
 
+function getInitialRoute(): string {
+  if (typeof window === 'undefined') return '/'
+  return window.location.pathname || '/'
+}
+
 function AppContent() {
-  const route = window.location.pathname
+  const [route, setRoute] = useState<string>(getInitialRoute)
+
+  useEffect(() => {
+    const onPop = () => setRoute(window.location.pathname || '/')
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
   if (route === '/admin') {
     return <AdminRoute />
   }
