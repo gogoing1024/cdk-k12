@@ -27,6 +27,8 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   const [bulkInput, setBulkInput] = useState('')
   const [bulkWsId, setBulkWsId] = useState('')
   const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [createSuccess, setCreateSuccess] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
   const [bulkMode, setBulkMode] = useState(false)
@@ -36,13 +38,30 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   const loadData = useCallback(async () => {
     const [k, w] = await Promise.all([getCDKKeys(), getWorkspaces()])
     setKeys(k)
-    setWorkspaces(w.map(({ id, workspaceId, name }) => ({ id, workspaceId, name })))
+    const wsList = w.map(({ id, workspaceId, name }) => ({ id, workspaceId, name }))
+    setWorkspaces(wsList)
+    const defaultWs = wsList.find(x => x.name === 'Default Workspace') || wsList[0]
+    if (defaultWs) {
+      setNewKeyWs(prev => prev || defaultWs.workspaceId)
+      setBulkWsId(prev => prev || defaultWs.workspaceId)
+    }
     onKeysChanged?.()
   }, [onKeysChanged])
 
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  function openCreateModal() {
+    setCreateError('')
+    setCreateSuccess('')
+    if (workspaces.length > 0) {
+      const defaultWs = workspaces.find(x => x.name === 'Default Workspace') || workspaces[0]
+      setNewKeyWs(defaultWs.workspaceId)
+      setBulkWsId(defaultWs.workspaceId)
+    }
+    setShowCreate('single')
+  }
 
   const filtered = keys.filter(k => {
     const matchSearch = search === '' ||
@@ -59,8 +78,13 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   }
 
   async function handleCreateSingle() {
-    if (!newKeyKey.trim() || !newKeyWs.trim()) return
+    if (!newKeyKey.trim() || !newKeyWs.trim()) {
+      setCreateError(lang === 'vi' ? 'Vui lòng nhập key và chọn workspace' : 'Please enter key and pick workspace')
+      return
+    }
     setCreating(true)
+    setCreateError('')
+    setCreateSuccess('')
     const record: CDKKey = {
       id: crypto.randomUUID(),
       key: newKeyKey.trim().toUpperCase(),
@@ -68,18 +92,34 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       status: 'live',
       createdAt: Date.now(),
     }
-    await addCDKKey(record)
-    await loadData()
-    setNewKeyKey('')
-    setNewKeyWs('')
-    setShowCreate(null)
-    setCreating(false)
+    try {
+      await addCDKKey(record)
+      await loadData()
+      setNewKeyKey('')
+      setNewKeyWs('')
+      setCreateSuccess(lang === 'vi' ? `Đã tạo key ${record.key}` : `Created key ${record.key}`)
+      setTimeout(() => {
+        setShowCreate(null)
+        setCreateSuccess('')
+      }, 900)
+    } catch (err: any) {
+      setCreateError(err?.message || (lang === 'vi' ? 'Tạo key thất bại' : 'Failed to create key'))
+    } finally {
+      setCreating(false)
+    }
   }
 
   async function handleCreateBulk() {
     const lines = bulkInput.split('\n').map(l => l.trim()).filter(Boolean)
-    if (lines.length === 0 || !bulkWsId.trim()) return
+    if (lines.length === 0 || !bulkWsId.trim()) {
+      setCreateError(lang === 'vi' ? 'Vui lòng nhập danh sách key và chọn workspace' : 'Please paste keys and pick workspace')
+      return
+    }
     setCreating(true)
+    setCreateError('')
+    setCreateSuccess('')
+    let success = 0
+    let failed: string[] = []
     for (const line of lines) {
       const record: CDKKey = {
         id: crypto.randomUUID(),
@@ -88,12 +128,36 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
         status: 'live',
         createdAt: Date.now(),
       }
-      await addCDKKey(record)
+      try {
+        await addCDKKey(record)
+        success++
+      } catch (err: any) {
+        failed.push(`${line} (${err?.message || 'error'})`)
+      }
     }
-    await loadData()
-    setBulkInput('')
-    setBulkWsId('')
-    setShowCreate(null)
+    try {
+      await loadData()
+    } catch (err: any) {
+      setCreateError(err?.message || (lang === 'vi' ? 'Lỗi tải lại danh sách' : 'Failed to reload list'))
+    }
+    if (failed.length === 0) {
+      setBulkInput('')
+      setBulkWsId('')
+      setCreateSuccess(lang === 'vi' ? `Đã tạo ${success} key` : `Created ${success} keys`)
+      setTimeout(() => {
+        setShowCreate(null)
+        setCreateSuccess('')
+      }, 900)
+    } else if (success > 0) {
+      setCreateError(
+        (lang === 'vi' ? `Tạo ${success} key thành công, ${failed.length} lỗi: ` : `Created ${success}, ${failed.length} failed: `) +
+        failed.slice(0, 3).join('; ') + (failed.length > 3 ? '…' : '')
+      )
+    } else {
+      setCreateError(
+        (lang === 'vi' ? `Tạo thất bại: ` : `All failed: `) + failed.slice(0, 3).join('; ')
+      )
+    }
     setCreating(false)
   }
 
@@ -159,6 +223,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       disable: 'Vô hiệu hóa',
       enable: 'Kích hoạt lại',
       noKeys: 'Chưa có key nào.',
+      noWorkspaces: 'Chưa có workspace nào — vào tab Workspaces để tạo',
       keyCol: 'CDK Key',
       wsCol: 'Workspace ID',
       statusCol: 'Trạng thái',
@@ -198,6 +263,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       disable: 'Disable',
       enable: 'Enable',
       noKeys: 'No keys yet.',
+      noWorkspaces: 'No workspaces — go to Workspaces tab to create one',
       keyCol: 'CDK Key',
       wsCol: 'Workspace ID',
       statusCol: 'Status',
@@ -237,7 +303,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
             {t.bulkCheck}
           </button>
           <button
-            onClick={() => setShowCreate('single')}
+            onClick={openCreateModal}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white transition-all"
           >
             <Plus size={14} strokeWidth={2} />
@@ -471,7 +537,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
           <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-2xl p-6 w-full max-w-md shadow-2xl animate-fade-in-up">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-sm font-bold text-slate-100">{t.createTitle}</h3>
-              <button onClick={() => setShowCreate(null)} className="text-slate-500 hover:text-slate-300">
+              <button onClick={() => { setShowCreate(null); setCreateError(''); setCreateSuccess('') }} className="text-slate-500 hover:text-slate-300">
                 <X size={18} strokeWidth={1.5} />
               </button>
             </div>
@@ -515,10 +581,16 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                     onChange={e => setNewKeyWs(e.target.value)}
                     className="w-full bg-[#22253a] border border-[#2a2d3a] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 appearance-none cursor-pointer"
                   >
-                    <option value="">{t.selectWs}</option>
-                    {workspaces.map(w => (
-                      <option key={w.id} value={w.workspaceId}>{w.name} — {w.workspaceId.slice(0, 8)}...</option>
-                    ))}
+                    {workspaces.length === 0 ? (
+                      <option value="">{t.noWorkspaces}</option>
+                    ) : (
+                      <>
+                        {!newKeyWs && <option value="">{t.selectWs}</option>}
+                        {workspaces.map(w => (
+                          <option key={w.id} value={w.workspaceId}>{w.name} — {w.workspaceId.slice(0, 8)}...</option>
+                        ))}
+                      </>
+                    )}
                   </select>
                 </div>
                 <button
@@ -529,6 +601,18 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                   {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                   {t.createBtn}
                 </button>
+                {createError && (
+                  <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs text-red-300">
+                    <X size={14} className="flex-shrink-0 mt-0.5" strokeWidth={2} />
+                    <span>{createError}</span>
+                  </div>
+                )}
+                {createSuccess && !createError && (
+                  <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2 text-xs text-emerald-300">
+                    <Check size={14} strokeWidth={2} />
+                    <span>{createSuccess}</span>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
@@ -539,10 +623,16 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                     onChange={e => setBulkWsId(e.target.value)}
                     className="w-full bg-[#22253a] border border-[#2a2d3a] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 appearance-none cursor-pointer mb-3"
                   >
-                    <option value="">{t.selectWs}</option>
-                    {workspaces.map(w => (
-                      <option key={w.id} value={w.workspaceId}>{w.name} — {w.workspaceId.slice(0, 8)}...</option>
-                    ))}
+                    {workspaces.length === 0 ? (
+                      <option value="">{t.noWorkspaces}</option>
+                    ) : (
+                      <>
+                        {!bulkWsId && <option value="">{t.selectWs}</option>}
+                        {workspaces.map(w => (
+                          <option key={w.id} value={w.workspaceId}>{w.name} — {w.workspaceId.slice(0, 8)}...</option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   <label className="block text-xs text-slate-500 mb-1.5">{t.bulkPlaceholder}</label>
                   <textarea
@@ -560,6 +650,18 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                   {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                   {t.createBtn} ({bulkInput.split('\n').filter(Boolean).length})
                 </button>
+                {createError && (
+                  <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs text-red-300">
+                    <X size={14} className="flex-shrink-0 mt-0.5" strokeWidth={2} />
+                    <span>{createError}</span>
+                  </div>
+                )}
+                {createSuccess && !createError && (
+                  <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2 text-xs text-emerald-300">
+                    <Check size={14} strokeWidth={2} />
+                    <span>{createSuccess}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
