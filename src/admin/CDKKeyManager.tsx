@@ -53,6 +53,16 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   useEffect(() => {
     // Initial mount: force fresh data
     loadData(true)
+    // Refresh keys when the tab regains focus (covers F5-from-different-tab,
+    // or keys added/removed by another admin/browser session).
+    const onFocus = () => loadData(true)
+    const onVis = () => { if (!document.hidden) loadData(true) }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [loadData])
 
   function openCreateModal() {

@@ -1,8 +1,8 @@
 import type { CDKKey, Workspace, AdminSession } from './types'
 
 const ADMIN_TOKEN_KEY = 'cdk_admin_token_v1'
-const KEYS_CACHE_KEY = 'cdk_keys_cache_v2'
-const WS_CACHE_KEY = 'cdk_ws_cache_v2'
+const KEYS_CACHE_KEY = 'cdk_keys_cache_v3'
+const WS_CACHE_KEY = 'cdk_ws_cache_v3'
 const KEYS_TTL_MS = 5 * 60 * 1000
 const WS_TTL_MS = 10 * 60 * 1000
 
