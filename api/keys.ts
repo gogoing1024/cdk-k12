@@ -10,8 +10,10 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'tandu05-secure-2026'
 
 const KEY_PREFIX = 'cdk:key:'
 const KEY_INDEX = 'cdk:keys:index'
+const KEYS_ALL = 'cdk:keys:all'
 const WS_PREFIX = 'cdk:ws:'
 const WS_INDEX = 'cdk:ws:index'
+const WS_ALL = 'cdk:ws:all'
 const DEFAULT_WS = {
   id: 'default',
   name: 'Default Workspace',
@@ -25,7 +27,6 @@ function isAdmin(req: VercelRequest): boolean {
   return token === ADMIN_TOKEN
 }
 
-// Minimal Upstash Redis REST client - bypasses @vercel/kv env detection issues
 async function redis(cmd: string[]): Promise<any> {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
   const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
@@ -47,7 +48,6 @@ async function redis(cmd: string[]): Promise<any> {
   const json = (await res.json()) as { result: any }
   const result = json.result
 
-  // GET returns the raw string; auto-parse JSON if it looks like an object
   if (cmd[0] === 'GET' && typeof result === 'string') {
     try {
       return JSON.parse(result)
@@ -66,6 +66,64 @@ function getAction(req: VercelRequest): string {
   )
 }
 
+// Read all keys from Redis. Uses cached snapshot (KEYS_ALL) when available;
+// falls back to scanning individual records and rebuilds the cache.
+async function readAllKeys(): Promise<any[]> {
+  const cached = await redis(['GET', KEYS_ALL])
+  if (Array.isArray(cached)) return cached
+
+  const ids = (await redis(['SMEMBERS', KEY_INDEX])) as string[]
+  if (ids.length === 0) {
+    await redis(['SET', KEYS_ALL, JSON.stringify([])])
+    return []
+  }
+
+  const recs = await Promise.all(
+    ids.map(id => redis(['GET', KEY_PREFIX + id]))
+  )
+  const items = recs.filter(Boolean)
+  await redis(['SET', KEYS_ALL, JSON.stringify(items)])
+  return items
+}
+
+// Write all keys to Redis + persist the snapshot for fast subsequent reads
+async function writeAllKeys(keys: any[]): Promise<void> {
+  await redis(['SET', KEYS_ALL, JSON.stringify(keys)])
+  await redis(['DEL', KEY_INDEX])
+  if (keys.length > 0) {
+    await redis(['SADD', KEY_INDEX, ...keys.map(k => k.id)])
+  }
+}
+
+async function readAllWorkspaces(): Promise<any[]> {
+  const cached = await redis(['GET', WS_ALL])
+  if (Array.isArray(cached)) return cached
+
+  const ids = (await redis(['SMEMBERS', WS_INDEX])) as string[]
+  if (ids.length === 0) {
+    const seed = [DEFAULT_WS]
+    await redis(['SET', WS_ALL, JSON.stringify(seed)])
+    return seed
+  }
+
+  const recs = await Promise.all(ids.map(id => redis(['GET', WS_PREFIX + id])))
+  const items = recs.filter(Boolean)
+  if (items.length === 0) {
+    const seed = [DEFAULT_WS]
+    await redis(['SET', WS_ALL, JSON.stringify(seed)])
+    return seed
+  }
+  await redis(['SET', WS_ALL, JSON.stringify(items)])
+  return items
+}
+
+async function writeAllWorkspaces(list: any[]): Promise<void> {
+  if (list.length === 0) list.push(DEFAULT_WS)
+  await redis(['SET', WS_ALL, JSON.stringify(list)])
+  await redis(['DEL', WS_INDEX])
+  await redis(['SADD', WS_INDEX, ...list.map(w => w.id)])
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
     Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v))
@@ -77,19 +135,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const action = getAction(req)
 
-    // Public: lookup key by key string
+    // Public: lookup key by key string - direct individual lookup is fine
     if (action === 'lookup') {
       const key = String(req.query.key || req.body?.key || '').trim().toLowerCase()
       if (!key) return res.status(400).json({ error: { message: 'Missing key' } })
 
-      const ids = (await redis(['SMEMBERS', KEY_INDEX])) as string[]
-      for (const id of ids) {
-        const rec = (await redis(['GET', KEY_PREFIX + id])) as any
-        if (rec && String(rec.key).toLowerCase() === key) {
-          return res.status(200).json({ key: rec })
-        }
-      }
-      return res.status(404).json({ error: { message: 'Key not found' } })
+      const items = await readAllKeys()
+      const found = items.find((r: any) => String(r.key).toLowerCase() === key)
+      if (!found) return res.status(404).json({ error: { message: 'Key not found' } })
+      return res.status(200).json({ key: found })
     }
 
     // Public: mark key as used
@@ -97,63 +151,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { key, email } = req.body || {}
       if (!key) return res.status(400).json({ error: { message: 'Missing key' } })
 
-      const ids = (await redis(['SMEMBERS', KEY_INDEX])) as string[]
-      for (const id of ids) {
-        const rec = (await redis(['GET', KEY_PREFIX + id])) as any
-        if (rec && String(rec.key).toLowerCase() === String(key).toLowerCase()) {
-          if (rec.status !== 'live') {
-            return res.status(409).json({ error: { message: 'Key is not live' } })
-          }
-          const updated = {
-            ...rec,
-            status: 'used',
-            activatedAt: Date.now(),
-            activatedEmail: email || '',
-          }
-          await redis(['SET', KEY_PREFIX + id, JSON.stringify(updated)])
-          return res.status(200).json({ key: updated })
-        }
+      const items = await readAllKeys()
+      const idx = items.findIndex((r: any) => String(r.key).toLowerCase() === String(key).toLowerCase())
+      if (idx === -1) return res.status(404).json({ error: { message: 'Key not found' } })
+      if (items[idx].status !== 'live') {
+        return res.status(409).json({ error: { message: 'Key is not live' } })
       }
-      return res.status(404).json({ error: { message: 'Key not found' } })
+      items[idx] = {
+        ...items[idx],
+        status: 'used',
+        activatedAt: Date.now(),
+        activatedEmail: email || '',
+      }
+      await writeAllKeys(items)
+      return res.status(200).json({ key: items[idx] })
     }
 
-    // Admin-only from here
     if (!isAdmin(req)) {
       return res.status(401).json({ error: { message: 'Unauthorized' } })
     }
 
     if (action === 'list') {
-      const ids = (await redis(['SMEMBERS', KEY_INDEX])) as string[]
-      const items: any[] = []
-      for (const id of ids) {
-        const rec = await redis(['GET', KEY_PREFIX + id])
-        if (rec) items.push(rec)
-      }
+      const items = await readAllKeys()
       items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
       return res.status(200).json({ keys: items })
     }
 
     if (action === 'stats') {
-      const ids = (await redis(['SMEMBERS', KEY_INDEX])) as string[]
-      const total = ids.length
-      if (total === 0) {
-        return res.status(200).json({ total: 0, live: 0, used: 0, disabled: 0 })
-      }
-      // Only sample 50 keys to keep response fast
-      const sampleSize = Math.min(50, total)
-      const sample = ids.slice(0, sampleSize)
+      const items = await readAllKeys()
       let live = 0
       let used = 0
       let disabled = 0
-      // Parallel GETs for speed
-      const recs = await Promise.all(sample.map(id => redis(['GET', KEY_PREFIX + id])))
-      for (const rec of recs) {
-        if (!rec) continue
+      for (const rec of items) {
         if (rec.status === 'live') live++
         else if (rec.status === 'used') used++
         else if (rec.status === 'disabled') disabled++
       }
-      return res.status(200).json({ total, sampled: sampleSize, live, used, disabled })
+      return res.status(200).json({ total: items.length, live, used, disabled })
     }
 
     if (action === 'add') {
@@ -161,8 +195,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!rec || !rec.id || !rec.key) {
         return res.status(400).json({ error: { message: 'Invalid key record' } })
       }
-      await redis(['SET', KEY_PREFIX + rec.id, JSON.stringify(rec)])
-      await redis(['SADD', KEY_INDEX, rec.id])
+      const items = await readAllKeys()
+      if (items.some((r: any) => r.id === rec.id)) {
+        return res.status(409).json({ error: { message: 'Key id already exists' } })
+      }
+      items.push(rec)
+      await writeAllKeys(items)
       return res.status(200).json({ key: rec })
     }
 
@@ -171,60 +209,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!rec || !rec.id) {
         return res.status(400).json({ error: { message: 'Invalid key record' } })
       }
-      await redis(['SET', KEY_PREFIX + rec.id, JSON.stringify(rec)])
+      const items = await readAllKeys()
+      const idx = items.findIndex((r: any) => r.id === rec.id)
+      if (idx === -1) return res.status(404).json({ error: { message: 'Key not found' } })
+      items[idx] = rec
+      await writeAllKeys(items)
       return res.status(200).json({ key: rec })
     }
 
     if (action === 'delete') {
       const id = String(req.query.id || req.body?.id || '')
       if (!id) return res.status(400).json({ error: { message: 'Missing id' } })
-      await redis(['DEL', KEY_PREFIX + id])
-      await redis(['SREM', KEY_INDEX, id])
+      const items = await readAllKeys()
+      const next = items.filter((r: any) => r.id !== id)
+      await writeAllKeys(next)
       return res.status(200).json({ ok: true })
     }
 
     if (action === 'replace-all') {
       const keys = (req.body?.keys || []) as any[]
-      const oldIds = (await redis(['SMEMBERS', KEY_INDEX])) as string[]
-      for (const id of oldIds) {
-        await redis(['DEL', KEY_PREFIX + id])
-      }
-      await redis(['DEL', KEY_INDEX])
-      for (const rec of keys) {
-        await redis(['SET', KEY_PREFIX + rec.id, JSON.stringify(rec)])
-        await redis(['SADD', KEY_INDEX, rec.id])
-      }
+      await writeAllKeys(keys)
       return res.status(200).json({ ok: true, count: keys.length })
     }
 
-    // Workspaces
     if (action === 'ws:list') {
-      const ids = (await redis(['SMEMBERS', WS_INDEX])) as string[]
-      if (ids.length === 0) {
-        await redis(['SET', WS_PREFIX + DEFAULT_WS.id, JSON.stringify(DEFAULT_WS)])
-        await redis(['SADD', WS_INDEX, DEFAULT_WS.id])
-        return res.status(200).json({ workspaces: [DEFAULT_WS] })
-      }
-      const items: any[] = []
-      for (const id of ids) {
-        const rec = await redis(['GET', WS_PREFIX + id])
-        if (rec) items.push(rec)
-      }
+      const items = await readAllWorkspaces()
       return res.status(200).json({ workspaces: items })
     }
 
     if (action === 'ws:replace-all') {
       const list = (req.body?.workspaces || []) as any[]
-      if (list.length === 0) list.push(DEFAULT_WS)
-      const oldIds = (await redis(['SMEMBERS', WS_INDEX])) as string[]
-      for (const id of oldIds) {
-        await redis(['DEL', WS_PREFIX + id])
-      }
-      await redis(['DEL', WS_INDEX])
-      for (const rec of list) {
-        await redis(['SET', WS_PREFIX + rec.id, JSON.stringify(rec)])
-        await redis(['SADD', WS_INDEX, rec.id])
-      }
+      await writeAllWorkspaces(list)
       return res.status(200).json({ ok: true })
     }
 
