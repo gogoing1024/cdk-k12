@@ -30,6 +30,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   const [bulkInput, setBulkInput] = useState('')
   const [bulkWsId, setBulkWsId] = useState('')
   const [creating, setCreating] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 })
   const [createError, setCreateError] = useState('')
   const [createSuccess, setCreateSuccess] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -141,40 +142,46 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     setCreating(true)
     setCreateError('')
     setCreateSuccess('')
+    setBulkProgress({ current: 0, total: lines.length })
 
-    const records: CDKKey[] = lines.map(line => ({
-      id: crypto.randomUUID(),
-      key: line.toUpperCase(),
-      workspaceId: bulkWsId.trim(),
-      status: 'live' as const,
-      createdAt: Date.now(),
-    }))
+    const wsId = bulkWsId.trim()
+    const successRecords: CDKKey[] = []
+    const failed: string[] = []
 
-    const results = await Promise.allSettled(records.map(rec => addCDKKey(rec)))
-    const success = results.filter(r => r.status === 'fulfilled').length
-    const failedRecords = records.filter((_, i) => results[i].status === 'rejected')
-    const failed = failedRecords.map(rec => {
-      const reason = (results[records.indexOf(rec)] as PromiseRejectedResult).reason
-      return `${rec.key} (${reason?.message || 'error'})`
-    })
-    const successRecords = records.filter((_, i) => results[i].status === 'fulfilled')
-
-    // Reflect success keys locally — cache already updated by addCDKKey
-    if (successRecords.length > 0) {
-      setKeys(prev => [...successRecords.reverse(), ...prev])
+    // Run sequentially with a short delay so Upstash rate limits aren't tripped.
+    // Updating cache progressively lets the list reflect each new key as it lands.
+    for (let i = 0; i < lines.length; i++) {
+      const rec: CDKKey = {
+        id: crypto.randomUUID(),
+        key: lines[i].toUpperCase(),
+        workspaceId: wsId,
+        status: 'live' as const,
+        createdAt: Date.now(),
+      }
+      try {
+        await addCDKKey(rec)
+        successRecords.push(rec)
+        setKeys(prev => [rec, ...prev])
+      } catch (err: any) {
+        failed.push(`${rec.key} (${err?.message || 'error'})`)
+      }
+      setBulkProgress({ current: i + 1, total: lines.length })
+      // Small breather between calls so Upstash can keep up with bursts of writes
+      if (i < lines.length - 1) await new Promise(r => setTimeout(r, 40))
     }
+
     if (failed.length === 0) {
       setBulkInput('')
       setBulkWsId('')
-      setCreateSuccess(lang === 'vi' ? `Đã tạo ${success} key` : `Created ${success} keys`)
+      setCreateSuccess(lang === 'vi' ? `Đã tạo ${successRecords.length} key` : `Created ${successRecords.length} keys`)
       setTimeout(() => {
         setShowCreate(null)
         setCreateSuccess('')
-      }, 900)
+      }, 1200)
       onKeysChanged?.()
-    } else if (success > 0) {
+    } else if (successRecords.length > 0) {
       setCreateError(
-        (lang === 'vi' ? `Tạo ${success} key thành công, ${failed.length} lỗi: ` : `Created ${success}, ${failed.length} failed: `) +
+        (lang === 'vi' ? `Tạo ${successRecords.length} thành công, ${failed.length} lỗi: ` : `Created ${successRecords.length}, ${failed.length} failed: `) +
         failed.slice(0, 3).join('; ') + (failed.length > 3 ? '…' : '')
       )
       onKeysChanged?.()
@@ -184,6 +191,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       )
     }
     setCreating(false)
+    setBulkProgress({ current: 0, total: 0 })
   }
 
   async function handleDelete(id: string) {
@@ -709,8 +717,20 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                   className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-bold text-sm py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  {t.createBtn} ({bulkInput.split('\n').filter(Boolean).length})
+                  {creating && bulkProgress.total > 0
+                    ? (lang === 'vi'
+                        ? `Đang tạo ${bulkProgress.current}/${bulkProgress.total}…`
+                        : `Creating ${bulkProgress.current}/${bulkProgress.total}…`)
+                    : `${t.createBtn} (${bulkInput.split('\n').filter(Boolean).length})`}
                 </button>
+                {creating && bulkProgress.total > 0 && (
+                  <div className="w-full bg-[#22253a] rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-indigo-500 h-full transition-all duration-150"
+                      style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }}
+                    />
+                  </div>
+                )}
                 {createError && (
                   <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs text-red-300">
                     <X size={14} className="flex-shrink-0 mt-0.5" strokeWidth={2} />
