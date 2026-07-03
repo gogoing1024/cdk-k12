@@ -45,7 +45,17 @@ async function redis(cmd: string[]): Promise<any> {
     throw new Error(`Redis HTTP ${res.status}: ${body}`)
   }
   const json = (await res.json()) as { result: any }
-  return json.result
+  const result = json.result
+
+  // GET returns the raw string; auto-parse JSON if it looks like an object
+  if (cmd[0] === 'GET' && typeof result === 'string') {
+    try {
+      return JSON.parse(result)
+    } catch {
+      return result
+    }
+  }
+  return result
 }
 
 function getAction(req: VercelRequest): string {
