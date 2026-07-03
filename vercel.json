@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!api|_vercel|favicon).*)", "destination": "/index.html" }
   ]
 }

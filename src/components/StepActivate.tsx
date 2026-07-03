@@ -104,19 +104,17 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
 
       const workspaceId = cdkRecord.workspaceId
 
-      // Step 2: Call ChatGPT API with the workspace ID
-      const res = await fetch(
-        `https://chatgpt.com/backend-api/accounts/${workspaceId}/invites/request`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${sessionData.accessToken}`,
-            'Content-Type': 'application/json',
-            'oai-language': navigator.language || 'en-US',
-          },
-          body: '',
-        }
-      )
+      // Step 2: Call proxy (avoids browser CORS on chatgpt.com)
+      const res = await fetch('/api/activate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspaceId,
+          accessToken: sessionData.accessToken,
+        }),
+      })
 
       const text = await res.text()
 
