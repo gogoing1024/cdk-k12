@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   KeyRound, Plus, Copy, Check, Trash2, Search, X,
-  ToggleLeft, ToggleRight, Loader2, ArrowRightLeft,
+  ToggleLeft, ToggleRight, Loader2, ArrowRightLeft, ChevronDown,
 } from 'lucide-react'
 import { CDKKey, STATUS_LABELS, formatDate } from './types'
 import {
   getCDKKeys, addCDKKey, updateCDKKey, deleteCDKKey,
   getWorkspaces,
 } from './db'
+import { formatWorkspaceLabel, type WorkspaceOption } from './workspaceSelect'
 
 interface CDKKeyManagerProps {
   lang: 'vi' | 'en'
@@ -17,6 +18,102 @@ interface CDKKeyManagerProps {
 type TabFilter = 'all' | 'live' | 'used' | 'disabled'
 
 const PAGE_SIZE = 50
+
+interface WorkspaceSelectProps {
+  value: string
+  onChange: (value: string) => void
+  workspaces: WorkspaceOption[]
+  placeholder: string
+  emptyLabel: string
+  disabled?: boolean
+  className?: string
+}
+
+function WorkspaceSelect({
+  value,
+  onChange,
+  workspaces,
+  placeholder,
+  emptyLabel,
+  disabled = false,
+  className = '',
+}: WorkspaceSelectProps) {
+  const [open, setOpen] = useState(false)
+  const selected = workspaces.find(workspace => workspace.workspaceId === value)
+  const label = selected ? formatWorkspaceLabel(selected) : placeholder
+  const isDisabled = disabled || workspaces.length === 0
+
+  function pickWorkspace(workspaceId: string) {
+    onChange(workspaceId)
+    setOpen(false)
+  }
+
+  return (
+    <div className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => !isDisabled && setOpen(prev => !prev)}
+        disabled={isDisabled}
+        className={`w-full bg-[#22253a] border rounded-xl px-4 py-3 text-sm text-left transition-all flex items-center justify-between gap-3 ${
+          open
+            ? 'border-indigo-500/50 ring-2 ring-indigo-500/10'
+            : 'border-[#2a2d3a] hover:border-indigo-500/30'
+        } ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${selected ? 'text-slate-200' : 'text-slate-500'}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="truncate">{workspaces.length === 0 ? emptyLabel : label}</span>
+        <ChevronDown
+          size={16}
+          strokeWidth={1.8}
+          className={`flex-shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180 text-indigo-300' : ''}`}
+        />
+      </button>
+
+      {open && !isDisabled && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-10 cursor-default"
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            aria-label="Close workspace menu"
+          />
+          <div
+            className="absolute left-0 right-0 top-full z-20 mt-2 max-h-56 overflow-y-auto rounded-xl border border-[#34384a] bg-[#151822] p-1.5 shadow-2xl shadow-black/40"
+            role="listbox"
+          >
+            {workspaces.map(workspace => {
+              const selectedItem = workspace.workspaceId === value
+              return (
+                <button
+                  key={workspace.id || workspace.workspaceId}
+                  type="button"
+                  onClick={() => pickWorkspace(workspace.workspaceId)}
+                  className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors flex items-center gap-2 ${
+                    selectedItem
+                      ? 'bg-indigo-500/20 text-indigo-100'
+                      : 'text-slate-300 hover:bg-[#22253a]'
+                  }`}
+                  role="option"
+                  aria-selected={selectedItem}
+                >
+                  <span className={`w-4 flex-shrink-0 ${selectedItem ? 'text-indigo-300' : 'text-transparent'}`}>
+                    <Check size={14} strokeWidth={2.2} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium">{workspace.name || workspace.workspaceId.slice(0, 8)}</span>
+                    <span className="block truncate text-[11px] font-mono text-slate-500">{workspace.workspaceId}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProps) {
   const [keys, setKeys] = useState<CDKKey[]>([])
@@ -869,22 +966,13 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                 </div>
                 <div>
                   <label className="block text-xs text-slate-500 mb-1.5">{t.wsLabel}</label>
-                  <select
+                  <WorkspaceSelect
                     value={newKeyWs}
-                    onChange={e => setNewKeyWs(e.target.value)}
-                    className="w-full bg-[#22253a] border border-[#2a2d3a] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 appearance-none cursor-pointer"
-                  >
-                    {workspaces.length === 0 ? (
-                      <option value="">{t.noWorkspaces}</option>
-                    ) : (
-                      <>
-                        {!newKeyWs && <option value="">{t.selectWs}</option>}
-                        {workspaces.map(w => (
-                          <option key={w.id} value={w.workspaceId}>{w.name} — {w.workspaceId.slice(0, 8)}...</option>
-                        ))}
-                      </>
-                    )}
-                  </select>
+                    onChange={setNewKeyWs}
+                    workspaces={workspaces}
+                    placeholder={t.selectWs}
+                    emptyLabel={t.noWorkspaces}
+                  />
                 </div>
                 <button
                   onClick={handleCreateSingle}
@@ -911,22 +999,14 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs text-slate-500 mb-1.5">{t.wsLabel}</label>
-                  <select
+                  <WorkspaceSelect
                     value={bulkWsId}
-                    onChange={e => setBulkWsId(e.target.value)}
-                    className="w-full bg-[#22253a] border border-[#2a2d3a] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 appearance-none cursor-pointer mb-3"
-                  >
-                    {workspaces.length === 0 ? (
-                      <option value="">{t.noWorkspaces}</option>
-                    ) : (
-                      <>
-                        {!bulkWsId && <option value="">{t.selectWs}</option>}
-                        {workspaces.map(w => (
-                          <option key={w.id} value={w.workspaceId}>{w.name} — {w.workspaceId.slice(0, 8)}...</option>
-                        ))}
-                      </>
-                    )}
-                  </select>
+                    onChange={setBulkWsId}
+                    workspaces={workspaces}
+                    placeholder={t.selectWs}
+                    emptyLabel={t.noWorkspaces}
+                    className="mb-3"
+                  />
                   <label className="block text-xs text-slate-500 mb-1.5">{t.bulkPlaceholder}</label>
                   <textarea
                     value={bulkInput}
@@ -1000,23 +1080,15 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
             </p>
 
             <label className="block text-xs text-slate-500 mb-1.5">{t.selectWs}</label>
-            <select
+            <WorkspaceSelect
               value={moveTargetWs}
-              onChange={e => setMoveTargetWs(e.target.value)}
+              onChange={setMoveTargetWs}
+              workspaces={workspaces}
+              placeholder={t.selectWs}
+              emptyLabel={t.noWorkspaces}
               disabled={moving}
-              className="w-full bg-[#22253a] border border-[#2a2d3a] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 appearance-none cursor-pointer disabled:opacity-50 mb-3"
-            >
-              {workspaces.length === 0 ? (
-                <option value="">{t.noWorkspaces}</option>
-              ) : (
-                <>
-                  {!moveTargetWs && <option value="">{t.selectWs}</option>}
-                  {workspaces.map(w => (
-                    <option key={w.id} value={w.workspaceId}>{w.name} — {w.workspaceId.slice(0, 8)}...</option>
-                  ))}
-                </>
-              )}
-            </select>
+              className="mb-3"
+            />
 
             <button
               onClick={handleMove}
