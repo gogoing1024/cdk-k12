@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   KeyRound, Plus, Copy, Check, Trash2, Search, X,
-  ToggleLeft, ToggleRight, Loader2,
+  ToggleLeft, ToggleRight, Loader2, ArrowRightLeft,
 } from 'lucide-react'
 import { CDKKey, STATUS_LABELS, formatDate } from './types'
 import {
@@ -38,6 +38,13 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   const [bulkMode, setBulkMode] = useState(false)
   const [bulkResults, setBulkResults] = useState<{ key: string; found: boolean; status: string; email?: string }[]>([])
   const [bulkSearching, setBulkSearching] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showMove, setShowMove] = useState(false)
+  const [moveTargetWs, setMoveTargetWs] = useState('')
+  const [moving, setMoving] = useState(false)
+  const [moveProgress, setMoveProgress] = useState({ current: 0, total: 0 })
+  const [moveError, setMoveError] = useState('')
+  const [moveSuccess, setMoveSuccess] = useState('')
 
   const loadData = useCallback(async (force = false) => {
     const [k, w] = await Promise.all([getCDKKeys(force), getWorkspaces(force)])
@@ -200,6 +207,94 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     setKeys(prev => prev.filter(k => k.id !== id))
     setShowDeleteConfirm(null)
     onKeysChanged?.()
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllLive() {
+    const live = filtered.filter(k => k.status === 'live').map(k => k.id)
+    setSelectedIds(new Set(live))
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
+  function openMoveModal() {
+    if (selectedIds.size === 0) return
+    const liveCount = keys.filter(k => selectedIds.has(k.id) && k.status === 'live').length
+    if (liveCount === 0) {
+      setMoveError(lang === 'vi' ? 'Chỉ có thể chuyển các key chưa kích hoạt (status=live)' : 'Only unactivated keys (status=live) can be moved')
+      return
+    }
+    setMoveError('')
+    setMoveSuccess('')
+    setMoveTargetWs(prev => prev || workspaces.find(w => w.name === 'Default Workspace')?.workspaceId || workspaces[0]?.workspaceId || '')
+    setShowMove(true)
+  }
+
+  async function handleMove() {
+    if (!moveTargetWs.trim()) {
+      setMoveError(lang === 'vi' ? 'Vui lòng chọn workspace đích' : 'Please pick a target workspace')
+      return
+    }
+    // Only move keys that are still 'live' — used/disabled keys are locked
+    const targets = keys.filter(k => selectedIds.has(k.id) && k.status === 'live')
+    if (targets.length === 0) {
+      setMoveError(lang === 'vi' ? 'Không còn key nào có thể chuyển (đã được dùng hoặc vô hiệu)' : 'No movable keys remain (already used or disabled)')
+      return
+    }
+    setMoving(true)
+    setMoveError('')
+    setMoveSuccess('')
+    setMoveProgress({ current: 0, total: targets.length })
+
+    const wsId = moveTargetWs.trim()
+    const moved: CDKKey[] = []
+    const failed: string[] = []
+
+    // Sequential to stay under Upstash rate limits, update UI per item.
+    for (let i = 0; i < targets.length; i++) {
+      const k = targets[i]
+      try {
+        const updated = await updateCDKKey(k.id, { workspaceId: wsId })
+        moved.push(updated)
+        setKeys(prev => prev.map(x => x.id === k.id ? { ...x, workspaceId: wsId } : x))
+      } catch (err: any) {
+        failed.push(`${k.key} (${err?.message || 'error'})`)
+      }
+      setMoveProgress({ current: i + 1, total: targets.length })
+      if (i < targets.length - 1) await new Promise(r => setTimeout(r, 40))
+    }
+
+    if (failed.length === 0) {
+      setMoveSuccess(lang === 'vi' ? `Đã chuyển ${moved.length} key sang workspace mới` : `Moved ${moved.length} keys to the new workspace`)
+      setSelectedIds(new Set())
+      onKeysChanged?.()
+      setTimeout(() => {
+        setShowMove(false)
+        setMoveSuccess('')
+      }, 1500)
+    } else if (moved.length > 0) {
+      setMoveError(
+        (lang === 'vi' ? `Chuyển ${moved.length} thành công, ${failed.length} lỗi: ` : `Moved ${moved.length}, ${failed.length} failed: `) +
+        failed.slice(0, 3).join('; ') + (failed.length > 3 ? '…' : '')
+      )
+      onKeysChanged?.()
+    } else {
+      setMoveError(
+        (lang === 'vi' ? `Chuyển thất bại: ` : `Move failed: `) + failed.slice(0, 3).join('; ')
+      )
+    }
+    setMoving(false)
+    setMoveProgress({ current: 0, total: 0 })
   }
 
   async function handleToggleStatus(key: CDKKey) {
@@ -458,6 +553,37 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
         </>
       )}
 
+      {/* Selection action bar */}
+      {!bulkMode && selectedIds.size > 0 && (
+        <div className="flex items-center justify-between gap-2 bg-indigo-500/10 border border-indigo-500/30 rounded-xl px-4 py-2.5">
+          <div className="flex items-center gap-2 text-xs text-indigo-200">
+            <Check size={14} strokeWidth={2} />
+            <span className="font-semibold">
+              {lang === 'vi'
+                ? `Đã chọn ${selectedIds.size} key (chỉ những key chưa kích hoạt mới chuyển được)`
+                : `${selectedIds.size} key(s) selected (only unactivated keys can be moved)`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={clearSelection}
+              disabled={moving}
+              className="text-xs px-3 py-1.5 rounded-lg bg-[#22253a] border border-[#2a2d3a] text-slate-300 hover:text-slate-100 transition-colors disabled:opacity-50"
+            >
+              {lang === 'vi' ? 'Bỏ chọn' : 'Clear'}
+            </button>
+            <button
+              onClick={openMoveModal}
+              disabled={moving}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white font-semibold transition-colors disabled:opacity-50"
+            >
+              <ArrowRightLeft size={12} strokeWidth={2} />
+              {lang === 'vi' ? 'Chuyển workspace' : 'Move workspace'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       {!bulkMode && (
         <div className="overflow-x-auto">
@@ -466,23 +592,50 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
           ) : (
             <div className="space-y-1">
               {/* Header */}
-              <div className="grid grid-cols-12 gap-2 px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                <div className="col-span-2">{t.keyCol}</div>
-                <div className="col-span-3">{t.wsCol}</div>
-                <div className="col-span-2">{t.statusCol}</div>
-                <div className="col-span-2">{t.createdCol}</div>
-                <div className="col-span-2">{t.emailCol}</div>
-                <div className="col-span-1" />
+              <div
+                className="grid gap-2 px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider items-center"
+                style={{ gridTemplateColumns: '28px 1fr 1.4fr 1fr 1fr 1fr 80px' }}
+              >
+                <div className="flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every(k => selectedIds.has(k.id))}
+                    onChange={e => e.target.checked ? selectAllLive() : clearSelection()}
+                    className="accent-indigo-500 cursor-pointer"
+                    title={lang === 'vi' ? 'Chọn tất cả key live (chưa kích hoạt)' : 'Select all live (unactivated) keys'}
+                  />
+                </div>
+                <div>{t.keyCol}</div>
+                <div>{t.wsCol}</div>
+                <div>{t.statusCol}</div>
+                <div>{t.createdCol}</div>
+                <div>{t.emailCol}</div>
+                <div />
               </div>
 
               {/* Rows */}
               {filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(key => (
                 <div
                   key={key.id}
-                  className="grid grid-cols-12 gap-2 items-center px-3 py-2.5 bg-[#1a1d27] rounded-lg hover:bg-[#22253a] transition-colors group"
+                  className="grid gap-2 items-center px-3 py-2.5 bg-[#1a1d27] rounded-lg hover:bg-[#22253a] transition-colors group"
+                  style={{ gridTemplateColumns: '28px 1fr 1.4fr 1fr 1fr 1fr 80px' }}
                 >
+                  {/* Select */}
+                  <div className="flex items-center justify-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(key.id)}
+                      disabled={key.status !== 'live'}
+                      onChange={() => toggleSelect(key.id)}
+                      className="accent-indigo-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                      title={key.status === 'live'
+                        ? (lang === 'vi' ? 'Chọn để chuyển workspace' : 'Select to move workspace')
+                        : (lang === 'vi' ? 'Chỉ key chưa kích hoạt mới chuyển được' : 'Only unactivated keys can be moved')}
+                    />
+                  </div>
+
                   {/* Key */}
-                  <div className="col-span-2 flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5">
                     <span className="text-xs font-mono font-semibold text-indigo-300 truncate">{key.key}</span>
                     <button
                       onClick={() => copyKey(key.key, key.id)}
@@ -498,31 +651,31 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                   </div>
 
                   {/* Workspace ID */}
-                  <div className="col-span-3">
+                  <div>
                     <span className="text-[11px] font-mono text-slate-500 truncate block">{key.workspaceId}</span>
                   </div>
 
                   {/* Status */}
-                  <div className="col-span-2">
+                  <div>
                     <span className={`text-xs font-semibold ${STATUS_LABELS[key.status].color}`}>
                       {STATUS_LABELS[key.status].vi}
                     </span>
                   </div>
 
                   {/* Created */}
-                  <div className="col-span-2">
+                  <div>
                     <span className="text-[11px] text-slate-500">{formatDate(key.createdAt)}</span>
                   </div>
 
                   {/* Email */}
-                  <div className="col-span-2">
+                  <div>
                     <span className="text-[11px] text-slate-400 truncate block">
                       {key.activatedEmail || t.notUsed}
                     </span>
                   </div>
 
                   {/* Actions */}
-                  <div className="col-span-1 flex items-center justify-end gap-1">
+                  <div className="flex items-center justify-end gap-1">
                     {key.status !== 'used' && (
                       <button
                         onClick={() => handleToggleStatus(key)}
@@ -743,6 +896,87 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                     <span>{createSuccess}</span>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Move to Workspace Modal */}
+      {showMove && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#1a1d27] border border-[#2a2d3a] rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <ArrowRightLeft size={16} strokeWidth={2} className="text-indigo-400" />
+                <h3 className="text-sm font-bold text-slate-100">
+                  {lang === 'vi' ? 'Chuyển key sang workspace khác' : 'Move keys to another workspace'}
+                </h3>
+              </div>
+              <button
+                onClick={() => { if (!moving) { setShowMove(false); setMoveError('') } }}
+                disabled={moving}
+                className="text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50"
+              >
+                <X size={16} strokeWidth={2} />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 mb-4">
+              {lang === 'vi'
+                ? `Workspace cũ có thể đã die. Chọn workspace mới để chuyển ${keys.filter(k => selectedIds.has(k.id) && k.status === 'live').length} key chưa kích hoạt.`
+                : `The old workspace may have died. Pick a new workspace for the ${keys.filter(k => selectedIds.has(k.id) && k.status === 'live').length} unactivated key(s).`}
+            </p>
+
+            <label className="block text-xs text-slate-500 mb-1.5">{t.selectWs}</label>
+            <select
+              value={moveTargetWs}
+              onChange={e => setMoveTargetWs(e.target.value)}
+              disabled={moving}
+              className="w-full bg-[#22253a] border border-[#2a2d3a] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 appearance-none cursor-pointer disabled:opacity-50 mb-3"
+            >
+              {workspaces.length === 0 ? (
+                <option value="">{t.noWorkspaces}</option>
+              ) : (
+                <>
+                  {!moveTargetWs && <option value="">{t.selectWs}</option>}
+                  {workspaces.map(w => (
+                    <option key={w.id} value={w.workspaceId}>{w.name} — {w.workspaceId.slice(0, 8)}...</option>
+                  ))}
+                </>
+              )}
+            </select>
+
+            <button
+              onClick={handleMove}
+              disabled={moving || !moveTargetWs.trim()}
+              className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-bold text-sm py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {moving ? <Loader2 size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
+              {moving && moveProgress.total > 0
+                ? (lang === 'vi'
+                    ? `Đang chuyển ${moveProgress.current}/${moveProgress.total}…`
+                    : `Moving ${moveProgress.current}/${moveProgress.total}…`)
+                : (lang === 'vi' ? 'Chuyển workspace' : 'Move workspace')}
+            </button>
+            {moving && moveProgress.total > 0 && (
+              <div className="w-full bg-[#22253a] rounded-full h-2 overflow-hidden mt-3">
+                <div
+                  className="bg-indigo-500 h-full transition-all duration-150"
+                  style={{ width: `${(moveProgress.current / moveProgress.total) * 100}%` }}
+                />
+              </div>
+            )}
+            {moveError && (
+              <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs text-red-300 mt-3">
+                <X size={14} className="flex-shrink-0 mt-0.5" strokeWidth={2} />
+                <span>{moveError}</span>
+              </div>
+            )}
+            {moveSuccess && !moveError && (
+              <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2 text-xs text-emerald-300 mt-3">
+                <Check size={14} strokeWidth={2} />
+                <span>{moveSuccess}</span>
               </div>
             )}
           </div>
