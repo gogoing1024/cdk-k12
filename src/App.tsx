@@ -6,9 +6,11 @@ import StepIndicator from './components/StepIndicator'
 import AdminLogin from './admin/AdminLogin'
 import AdminDashboard from './admin/AdminDashboard'
 import { getAdminSession } from './admin/db'
+import type { AuthSession } from './lib/sessionExport'
 
 export type SessionData = {
   accessToken: string
+  rawSession: AuthSession
   user: {
     id: string
     name: string

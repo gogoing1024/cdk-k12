@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Zap, ArrowLeft, CheckCircle, XCircle, Loader2, User } from 'lucide-react'
+import { Zap, ArrowLeft, CheckCircle, XCircle, Loader2, User, Download } from 'lucide-react'
 import type { SessionData } from '../App'
 import { getCDKKeyByKey, markCDKKeyUsed } from '../admin/db'
+import { createActivationLog, type ActivationLogEntry } from '../lib/activationLog'
 
 interface StepActivateProps {
   lang: 'vi' | 'en'
@@ -13,6 +14,10 @@ interface StepActivateProps {
 export default function StepActivate({ lang, cdkKey, sessionData, onBack }: StepActivateProps) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
+  const [downloadFile, setDownloadFile] = useState<{ fileName: string; content: string } | null>(null)
+  const [logs, setLogs] = useState<ActivationLogEntry[]>([])
 
   const labels = {
     vi: {
@@ -21,8 +26,12 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
       desc: 'Thông tin đã hợp lệ. Bấm nút bên dưới để bắt đầu kích hoạt ChatGPT Plus.',
       activateBtn: 'Kích hoạt ngay',
       preparing: 'Đang kích hoạt...',
+      exporting: 'Đang chuẩn bị file...',
       success: 'Kích hoạt Plus thành công!',
       error: 'Kích hoạt thất bại',
+      download: 'Tải file JSON',
+      exportFailed: 'Tạo file JSON thất bại',
+      logsTitle: 'Nhật ký xử lý',
       note: 'Nếu trạng thái tài khoản chưa đổi, hãy tải lại trang ChatGPT vài lần để dữ liệu đồng bộ.',
       email: 'Email',
       accountId: 'Account ID',
@@ -39,8 +48,12 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
       desc: 'Information is valid. Click the button below to start activating ChatGPT Plus.',
       activateBtn: 'Activate Now',
       preparing: 'Activating...',
+      exporting: 'Preparing JSON file...',
       success: 'Plus activation successful!',
       error: 'Activation failed',
+      download: 'Download JSON',
+      exportFailed: 'JSON export failed',
+      logsTitle: 'Process Log',
       note: 'If account status does not change, reload the ChatGPT page a few times for data sync.',
       email: 'Email',
       accountId: 'Account ID',
@@ -54,6 +67,24 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
   }
 
   const t = labels[lang]
+
+  function addLog(level: ActivationLogEntry['level'], message: string) {
+    setLogs(prev => [...prev, createActivationLog(level, message)])
+  }
+
+  function appendServerLogs(serverLogs: unknown) {
+    if (!Array.isArray(serverLogs)) return
+    const safeLogs = serverLogs.filter((item): item is ActivationLogEntry => (
+      item &&
+      typeof item === 'object' &&
+      ['info', 'success', 'warning', 'error'].includes((item as any).level) &&
+      typeof (item as any).message === 'string' &&
+      typeof (item as any).time === 'string'
+    ))
+    if (safeLogs.length > 0) {
+      setLogs(prev => [...prev, ...safeLogs])
+    }
+  }
 
   function parseJwt(token: string) {
     try {
@@ -81,30 +112,95 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
     return text.slice(0, 150) || `HTTP ${status}`
   }
 
+  function parseApiError(text: string, status: number): string {
+    try {
+      const json = JSON.parse(text)
+      appendServerLogs(json?.logs)
+      return json?.error?.detail || json?.error?.message || `HTTP ${status}`
+    } catch {
+      return text.slice(0, 150) || `HTTP ${status}`
+    }
+  }
+
+  async function prepareExportFile(workspaceId: string) {
+    if (!sessionData?.rawSession) {
+      throw new Error('Missing AuthSession data')
+    }
+
+    const res = await fetch('/api/export-session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        workspaceId,
+        session: sessionData.rawSession,
+      }),
+    })
+
+    const text = await res.text()
+    if (!res.ok) {
+      throw new Error(parseApiError(text, res.status))
+    }
+
+    const data = JSON.parse(text) as { fileName?: string; exportJson?: unknown; logs?: unknown }
+    appendServerLogs(data.logs)
+    if (!data.fileName || !data.exportJson) {
+      throw new Error(t.serverError)
+    }
+
+    setDownloadFile({
+      fileName: data.fileName,
+      content: `${JSON.stringify(data.exportJson, null, 2)}\n`,
+    })
+  }
+
+  function downloadExportFile() {
+    if (!downloadFile) return
+    const blob = new Blob([downloadFile.content], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = downloadFile.fileName
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
   async function activate() {
     if (!sessionData) return
     setStatus('loading')
     setErrorMsg('')
+    setExportError('')
+    setDownloadFile(null)
+    setExporting(false)
+    setLogs([createActivationLog('info', '开始激活流程')])
 
     try {
       // Step 1: Look up CDK key to get workspace ID
+      addLog('info', '正在校验 CDK')
       const cdkRecord = await getCDKKeyByKey(cdkKey)
 
       if (!cdkRecord) {
+        addLog('error', t.notFound)
         setErrorMsg(t.notFound)
         setStatus('error')
         return
       }
 
       if (cdkRecord.status !== 'live') {
+        addLog('error', t.invalidKey)
         setErrorMsg(t.invalidKey)
         setStatus('error')
         return
       }
 
       const workspaceId = cdkRecord.workspaceId
+      addLog('success', `CDK 校验通过，workspace=${workspaceId.slice(0, 8)}...`)
 
       // Step 2: Call proxy (avoids browser CORS on chatgpt.com)
+      addLog('info', '正在请求 ChatGPT 激活接口')
       const res = await fetch('/api/activate', {
         method: 'POST',
         headers: {
@@ -120,14 +216,31 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
 
       if (res.ok) {
         // Step 3: Mark key as used
+        addLog('success', `ChatGPT 激活接口返回 HTTP ${res.status}`)
+        addLog('info', '正在标记 CDK 已使用')
         await markCDKKeyUsed(cdkKey, sessionData.user.email || '')
+        addLog('success', 'CDK 已标记为已使用')
+        setExporting(true)
+        addLog('info', '正在切换 workspace 并生成下载 JSON')
+        try {
+          await prepareExportFile(workspaceId)
+          addLog('success', '下载 JSON 已准备好')
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          addLog('warning', message)
+          setExportError(message)
+        } finally {
+          setExporting(false)
+        }
         setStatus('success')
       } else {
         const err = parseError(text, res.status)
+        addLog('error', `ChatGPT 激活失败：${err}`)
         setErrorMsg(err)
         setStatus('error')
       }
     } catch (e) {
+      addLog('error', t.networkError)
       setErrorMsg(t.networkError)
       setStatus('error')
     }
@@ -198,6 +311,31 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
         {/* Description */}
         <p className="text-xs text-slate-400 mb-5 leading-relaxed">{t.desc}</p>
 
+        {logs.length > 0 && (
+          <div className="bg-[#0f1117] border border-[#2a2d3a] rounded-xl p-3 mb-4">
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-2">{t.logsTitle}</p>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              {logs.map((log, index) => (
+                <div key={`${log.time}-${index}`} className="grid grid-cols-[56px_8px_1fr] gap-2 items-start text-[11px] leading-relaxed">
+                  <span className="font-mono text-slate-600">{log.time}</span>
+                  <span className={
+                    log.level === 'success' ? 'text-emerald-400' :
+                    log.level === 'warning' ? 'text-amber-400' :
+                    log.level === 'error' ? 'text-red-400' :
+                    'text-indigo-400'
+                  }>●</span>
+                  <span className={
+                    log.level === 'success' ? 'text-emerald-300' :
+                    log.level === 'warning' ? 'text-amber-300' :
+                    log.level === 'error' ? 'text-red-300' :
+                    'text-slate-400'
+                  }>{log.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Action */}
         {status === 'idle' && (
           <button
@@ -214,7 +352,7 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
               <Loader2 size={36} className="text-indigo-400 animate-spin" strokeWidth={1.5} />
               <div className="absolute inset-0 rounded-full border-2 border-indigo-400/20 animate-ping" />
             </div>
-            <p className="text-sm text-slate-400 font-medium">{t.preparing}</p>
+            <p className="text-sm text-slate-400 font-medium">{exporting ? t.exporting : t.preparing}</p>
           </div>
         )}
 
@@ -226,6 +364,21 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
             </div>
             <p className="text-base font-bold text-emerald-400">{t.success}</p>
             <p className="text-xs text-slate-500 text-center leading-relaxed max-w-xs">{t.note}</p>
+            {downloadFile && (
+              <button
+                onClick={downloadExportFile}
+                className="mt-2 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-sm px-5 py-3 rounded-xl transition-all active:scale-[0.97] shadow-lg shadow-emerald-500/20"
+              >
+                <Download size={15} strokeWidth={2} />
+                {t.download}
+              </button>
+            )}
+            {exportError && (
+              <div className="mt-2 w-full bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+                <p className="text-xs font-bold text-amber-400">{t.exportFailed}</p>
+                <p className="text-[11px] text-slate-500 mt-1 break-words">{exportError}</p>
+              </div>
+            )}
           </div>
         )}
 

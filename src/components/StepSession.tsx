@@ -109,6 +109,7 @@ export default function StepSession({ lang, onNext, onBack }: StepSessionProps) 
 
     onNext({
       accessToken: parsed.accessToken,
+      rawSession: parsed,
       user: {
         id: parsed.user?.id || '',
         name: prof.name || parsed.user?.name || '',
