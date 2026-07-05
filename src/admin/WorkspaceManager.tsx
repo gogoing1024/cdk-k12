@@ -8,7 +8,7 @@ import {
 } from './db'
 
 interface WorkspaceManagerProps {
-  lang: 'vi' | 'en'
+  lang: 'zh' | 'en'
   onWorkspacesChanged?: () => void
 }
 
@@ -85,24 +85,24 @@ export default function WorkspaceManager({ lang, onWorkspacesChanged }: Workspac
   }
 
   const labels = {
-    vi: {
-      title: 'Quản lý Workspace',
-      add: 'Thêm Workspace',
-      nameLabel: 'Tên Workspace',
+    zh: {
+      title: 'Workspace 管理',
+      add: '添加 Workspace',
+      nameLabel: 'Workspace 名称',
       wsIdLabel: 'Workspace ID',
-      namePlaceholder: 'VD: Workspace Chính',
-      wsIdPlaceholder: 'VD: 5e4c9b31-1b4e-4887-839b-607597928d7c',
-      create: 'Tạo mới',
-      save: 'Lưu',
-      cancel: 'Hủy',
-      delete: 'Xóa',
-      default: 'Mặc định',
-      setDefault: 'Đặt mặc định',
-      noWorkspaces: 'Chưa có workspace nào.',
-      colName: 'Tên',
+      namePlaceholder: '例如：主 Workspace',
+      wsIdPlaceholder: '例如：5e4c9b31-1b4e-4887-839b-607597928d7c',
+      create: '新建',
+      save: '保存',
+      cancel: '取消',
+      delete: '删除',
+      default: '默认',
+      setDefault: '设为默认',
+      noWorkspaces: '暂无 workspace。',
+      colName: '名称',
       colWsId: 'Workspace ID',
-      colCreated: 'Ngày tạo',
-      colActions: 'Hành động',
+      colCreated: '创建时间',
+      colActions: '操作',
     },
     en: {
       title: 'Workspace Management',

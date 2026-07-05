@@ -49,7 +49,7 @@ function AdminRoute() {
   }
   return (
     <AdminDashboard
-      lang="vi"
+      lang="zh"
       onLogout={() => {
         try { (window.location as any).href = '/' } catch { /* noop */ }
       }}
@@ -61,11 +61,11 @@ function MainApp() {
   const [step, setStep] = useState(1)
   const [cdkKey, setCdkKey] = useState('')
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
-  const [lang, setLang] = useState<'vi' | 'en'>('vi')
+  const [lang, setLang] = useState<'zh' | 'en'>('zh')
 
   const labels = {
-    vi: {
-      stepLabels: ['CDK Key', 'AuthSession', 'Kích hoạt'],
+    zh: {
+      stepLabels: ['CDK Key', 'AuthSession', '激活'],
     },
     en: {
       stepLabels: ['CDK Key', 'AuthSession', 'Activate'],
@@ -93,10 +93,10 @@ function MainApp() {
           </div>
 
           <button
-            onClick={() => setLang(l => l === 'vi' ? 'en' : 'vi')}
+            onClick={() => setLang(l => l === 'zh' ? 'en' : 'zh')}
             className="text-[10px] px-2.5 py-1 rounded-lg bg-[#22253a] border border-[#2a2d3a] text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-all font-mono font-semibold"
           >
-            {lang === 'vi' ? 'EN' : 'VI'}
+            {lang === 'zh' ? 'EN' : '中文'}
           </button>
         </div>
       </header>

@@ -29,7 +29,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
       })
       onLogin()
     } else {
-      setError('Tên đăng nhập hoặc mật khẩu không đúng.')
+      setError('用户名或密码不正确。')
     }
     setLoading(false)
   }
@@ -52,13 +52,13 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
             {/* Username */}
             <div>
               <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
-                Tài khoản
+                账号
               </label>
               <input
                 type="text"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
-                placeholder="Nhập tài khoản admin"
+                placeholder="输入管理员账号"
                 className="w-full bg-[#22253a] border border-[#2a2d3a] rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
                 autoComplete="username"
                 required
@@ -68,14 +68,14 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
             {/* Password */}
             <div>
               <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
-                Mật khẩu
+                密码
               </label>
               <div className="relative">
                 <input
                   type={showPass ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="Nhập mật khẩu"
+                  placeholder="输入密码"
                   className="w-full bg-[#22253a] border border-[#2a2d3a] rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all pr-10"
                   autoComplete="current-password"
                   required
@@ -109,7 +109,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
               ) : (
                 <>
                   <Lock size={15} strokeWidth={1.5} />
-                  Đăng nhập
+                  登录
                 </>
               )}
             </button>
@@ -119,7 +119,7 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
         {/* Back link */}
         <div className="text-center mt-6">
           <a href="/" className="text-xs text-slate-600 hover:text-slate-400 transition-colors">
-            ← Quay lại trang chính
+            ← 返回首页
           </a>
         </div>
       </div>

@@ -5,7 +5,7 @@ import { getCDKKeyByKey, markCDKKeyUsed } from '../admin/db'
 import { createActivationLog, type ActivationLogEntry } from '../lib/activationLog'
 
 interface StepActivateProps {
-  lang: 'vi' | 'en'
+  lang: 'zh' | 'en'
   cdkKey: string
   sessionData: SessionData | null
   onBack: () => void
@@ -20,27 +20,27 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
   const [logs, setLogs] = useState<ActivationLogEntry[]>([])
 
   const labels = {
-    vi: {
-      title: 'Kích hoạt Plus',
-      subtitle: 'Bước 3 trong 3',
-      desc: 'Thông tin đã hợp lệ. Bấm nút bên dưới để bắt đầu kích hoạt ChatGPT Plus.',
-      activateBtn: 'Kích hoạt ngay',
-      preparing: 'Đang kích hoạt...',
-      exporting: 'Đang chuẩn bị file...',
-      success: 'Kích hoạt Plus thành công!',
-      error: 'Kích hoạt thất bại',
-      download: 'Tải file JSON',
-      exportFailed: 'Tạo file JSON thất bại',
-      logsTitle: 'Nhật ký xử lý',
-      note: 'Nếu trạng thái tài khoản chưa đổi, hãy tải lại trang ChatGPT vài lần để dữ liệu đồng bộ.',
+    zh: {
+      title: '激活 Plus',
+      subtitle: '第 3 步，共 3 步',
+      desc: '信息已验证。点击下方按钮开始激活 ChatGPT Plus。',
+      activateBtn: '立即激活',
+      preparing: '正在激活...',
+      exporting: '正在准备文件...',
+      success: 'Plus 激活成功！',
+      error: '激活失败',
+      download: '下载 JSON 文件',
+      exportFailed: '生成 JSON 文件失败',
+      logsTitle: '处理日志',
+      note: '如果账号状态没有变化，请刷新几次 ChatGPT 页面等待同步。',
       email: 'Email',
       accountId: 'Account ID',
-      plan: 'Loại tài khoản',
-      retry: 'Thử lại',
-      notFound: 'Mã CDK không tìm thấy trong hệ thống.',
-      invalidKey: 'Mã CDK không hợp lệ hoặc đã bị vô hiệu hóa.',
-      networkError: 'Lỗi kết nối. Vui lòng kiểm tra mạng.',
-      serverError: 'Lỗi server. Vui lòng thử lại sau.',
+      plan: '账号类型',
+      retry: '重试',
+      notFound: '系统中未找到该 CDK。',
+      invalidKey: 'CDK 无效或已被禁用。',
+      networkError: '连接失败，请检查网络。',
+      serverError: '服务器错误，请稍后重试。',
     },
     en: {
       title: 'Activate Plus',
@@ -269,7 +269,7 @@ export default function StepActivate({ lang, cdkKey, sessionData, onBack }: Step
           </div>
           {status === 'idle' && (
             <button onClick={onBack} className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 transition-colors">
-              <ArrowLeft size={14} strokeWidth={1.5} /> {lang === 'vi' ? 'Quay lại' : 'Back'}
+              <ArrowLeft size={14} strokeWidth={1.5} /> {lang === 'zh' ? '返回' : 'Back'}
             </button>
           )}
         </div>

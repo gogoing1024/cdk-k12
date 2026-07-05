@@ -9,15 +9,23 @@ import {
   getWorkspaces,
 } from './db'
 import { formatWorkspaceLabel, type WorkspaceOption } from './workspaceSelect'
+import {
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
+  clampPage,
+  getPageCount,
+  getPageItems,
+  getPageRange,
+  prependItems,
+  removeItemsById,
+} from './cdkListState'
 
 interface CDKKeyManagerProps {
-  lang: 'vi' | 'en'
+  lang: 'zh' | 'en'
   onKeysChanged?: () => void
 }
 
 type TabFilter = 'all' | 'live' | 'used' | 'disabled'
-
-const PAGE_SIZE = 50
 
 interface WorkspaceSelectProps {
   value: string
@@ -80,7 +88,7 @@ function WorkspaceSelect({
             aria-label="Close workspace menu"
           />
           <div
-            className="absolute left-0 right-0 top-full z-20 mt-2 max-h-56 overflow-y-auto rounded-xl border border-[#34384a] bg-[#151822] p-1.5 shadow-2xl shadow-black/40"
+            className="absolute left-0 right-0 top-full z-20 mt-2 max-h-56 overflow-y-auto rounded-xl border border-[#34384a] bg-[#151822] p-2 shadow-2xl shadow-black/40 space-y-1"
             role="listbox"
           >
             {workspaces.map(workspace => {
@@ -90,7 +98,7 @@ function WorkspaceSelect({
                   key={workspace.id || workspace.workspaceId}
                   type="button"
                   onClick={() => pickWorkspace(workspace.workspaceId)}
-                  className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors flex items-center gap-2 ${
+                  className={`w-full rounded-lg px-3.5 py-3 text-left transition-colors flex items-center gap-3 ${
                     selectedItem
                       ? 'bg-indigo-500/20 text-indigo-100'
                       : 'text-slate-300 hover:bg-[#22253a]'
@@ -98,12 +106,12 @@ function WorkspaceSelect({
                   role="option"
                   aria-selected={selectedItem}
                 >
-                  <span className={`w-4 flex-shrink-0 ${selectedItem ? 'text-indigo-300' : 'text-transparent'}`}>
+                  <span className={`w-5 flex-shrink-0 flex justify-center ${selectedItem ? 'text-indigo-300' : 'text-transparent'}`}>
                     <Check size={14} strokeWidth={2.2} />
                   </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{workspace.name || workspace.workspaceId.slice(0, 8)}</span>
-                    <span className="block truncate text-[11px] font-mono text-slate-500">{workspace.workspaceId}</span>
+                  <span className="min-w-0 space-y-1">
+                    <span className="block truncate text-sm font-medium leading-snug">{workspace.name || workspace.workspaceId.slice(0, 8)}</span>
+                    <span className="block truncate text-[11px] font-mono leading-tight text-slate-500">{workspace.workspaceId}</span>
                   </span>
                 </button>
               )
@@ -121,6 +129,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   const [tab, setTab] = useState<TabFilter>('all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [showCreate, setShowCreate] = useState<'single' | 'bulk' | null>(null)
   const [newKeyKey, setNewKeyKey] = useState('')
   const [newKeyWs, setNewKeyWs] = useState('')
@@ -138,6 +147,8 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   const [bulkDisabling, setBulkDisabling] = useState(false)
   const [bulkDisableProgress, setBulkDisableProgress] = useState({ current: 0, total: 0 })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState({ current: 0, total: 0 })
   const [showMove, setShowMove] = useState(false)
   const [moveTargetWs, setMoveTargetWs] = useState('')
   const [moving, setMoving] = useState(false)
@@ -194,7 +205,11 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
 
   useEffect(() => {
     setPage(1)
-  }, [search, tab])
+  }, [search, tab, pageSize])
+
+  useEffect(() => {
+    setPage(prev => clampPage(prev, filtered.length, pageSize))
+  }, [filtered.length, pageSize])
 
   function copyKey(key: string, id: string) {
     navigator.clipboard.writeText(key).catch(() => {})
@@ -204,7 +219,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
 
   async function handleCreateSingle() {
     if (!newKeyKey.trim() || !newKeyWs.trim()) {
-      setCreateError(lang === 'vi' ? 'Vui lòng nhập key và chọn workspace' : 'Please enter key and pick workspace')
+      setCreateError(lang === 'zh' ? '请输入 key 并选择 workspace' : 'Please enter key and pick workspace')
       return
     }
     setCreating(true)
@@ -226,14 +241,14 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       })
       setNewKeyKey('')
       setNewKeyWs('')
-      setCreateSuccess(lang === 'vi' ? `Đã tạo key ${record.key}` : `Created key ${record.key}`)
+      setCreateSuccess(lang === 'zh' ? `已创建 key ${record.key}` : `Created key ${record.key}`)
       setTimeout(() => {
         setShowCreate(null)
         setCreateSuccess('')
       }, 900)
       onKeysChanged?.()
     } catch (err: any) {
-      setCreateError(err?.message || (lang === 'vi' ? 'Tạo key thất bại' : 'Failed to create key'))
+      setCreateError(err?.message || (lang === 'zh' ? '创建 key 失败' : 'Failed to create key'))
     } finally {
       setCreating(false)
     }
@@ -242,7 +257,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
   async function handleCreateBulk() {
     const lines = bulkInput.split('\n').map(l => l.trim()).filter(Boolean)
     if (lines.length === 0 || !bulkWsId.trim()) {
-      setCreateError(lang === 'vi' ? 'Vui lòng nhập danh sách key và chọn workspace' : 'Please paste keys and pick workspace')
+      setCreateError(lang === 'zh' ? '请输入 key 列表并选择 workspace' : 'Please paste keys and pick workspace')
       return
     }
     setCreating(true)
@@ -255,7 +270,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     const failed: string[] = []
 
     // Run sequentially with a short delay so Upstash rate limits aren't tripped.
-    // Updating cache progressively lets the list reflect each new key as it lands.
+    // Keep list structure stable during the batch; insert successful records once at the end.
     for (let i = 0; i < lines.length; i++) {
       const rec: CDKKey = {
         id: crypto.randomUUID(),
@@ -267,7 +282,6 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       try {
         await addCDKKey(rec)
         successRecords.push(rec)
-        setKeys(prev => [rec, ...prev])
       } catch (err: any) {
         failed.push(`${rec.key} (${err?.message || 'error'})`)
       }
@@ -277,9 +291,10 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     }
 
     if (failed.length === 0) {
+      setKeys(prev => prependItems(prev, [...successRecords].reverse()))
       setBulkInput('')
       setBulkWsId('')
-      setCreateSuccess(lang === 'vi' ? `Đã tạo ${successRecords.length} key` : `Created ${successRecords.length} keys`)
+      setCreateSuccess(lang === 'zh' ? `已创建 ${successRecords.length} 个 key` : `Created ${successRecords.length} keys`)
       setTimeout(() => {
         setShowCreate(null)
         setCreateSuccess('')
@@ -287,13 +302,14 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       onKeysChanged?.()
     } else if (successRecords.length > 0) {
       setCreateError(
-        (lang === 'vi' ? `Tạo ${successRecords.length} thành công, ${failed.length} lỗi: ` : `Created ${successRecords.length}, ${failed.length} failed: `) +
+        (lang === 'zh' ? `成功创建 ${successRecords.length} 个，${failed.length} 个失败：` : `Created ${successRecords.length}, ${failed.length} failed: `) +
         failed.slice(0, 3).join('; ') + (failed.length > 3 ? '…' : '')
       )
+      setKeys(prev => prependItems(prev, [...successRecords].reverse()))
       onKeysChanged?.()
     } else {
       setCreateError(
-        (lang === 'vi' ? `Tạo thất bại: ` : `All failed: `) + failed.slice(0, 3).join('; ')
+        (lang === 'zh' ? `创建失败：` : `All failed: `) + failed.slice(0, 3).join('; ')
       )
     }
     setCreating(false)
@@ -304,6 +320,11 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     await deleteCDKKey(id)
     // Cache already updated by deleteCDKKey
     setKeys(prev => prev.filter(k => k.id !== id))
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
     setShowDeleteConfirm(null)
     onKeysChanged?.()
   }
@@ -317,9 +338,20 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     })
   }
 
-  function selectAllLive() {
-    const live = filtered.filter(k => k.status === 'live').map(k => k.id)
-    setSelectedIds(new Set(live))
+  function selectCurrentPage() {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      for (const key of pagedKeys) next.add(key.id)
+      return next
+    })
+  }
+
+  function clearCurrentPageSelection() {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      for (const key of pagedKeys) next.delete(key.id)
+      return next
+    })
   }
 
   function clearSelection() {
@@ -330,7 +362,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     if (selectedIds.size === 0) return
     const liveCount = keys.filter(k => selectedIds.has(k.id) && k.status === 'live').length
     if (liveCount === 0) {
-      setMoveError(lang === 'vi' ? 'Chỉ có thể chuyển các key chưa kích hoạt (status=live)' : 'Only unactivated keys (status=live) can be moved')
+      setMoveError(lang === 'zh' ? '只能移动未激活的 key（status=live）' : 'Only unactivated keys (status=live) can be moved')
       return
     }
     setMoveError('')
@@ -341,13 +373,13 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
 
   async function handleMove() {
     if (!moveTargetWs.trim()) {
-      setMoveError(lang === 'vi' ? 'Vui lòng chọn workspace đích' : 'Please pick a target workspace')
+      setMoveError(lang === 'zh' ? '请选择目标 workspace' : 'Please pick a target workspace')
       return
     }
     // Only move keys that are still 'live' — used/disabled keys are locked
     const targets = keys.filter(k => selectedIds.has(k.id) && k.status === 'live')
     if (targets.length === 0) {
-      setMoveError(lang === 'vi' ? 'Không còn key nào có thể chuyển (đã được dùng hoặc vô hiệu)' : 'No movable keys remain (already used or disabled)')
+      setMoveError(lang === 'zh' ? '没有可移动的 key（已使用或已禁用）' : 'No movable keys remain (already used or disabled)')
       return
     }
     setMoving(true)
@@ -374,7 +406,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     }
 
     if (failed.length === 0) {
-      setMoveSuccess(lang === 'vi' ? `Đã chuyển ${moved.length} key sang workspace mới` : `Moved ${moved.length} keys to the new workspace`)
+      setMoveSuccess(lang === 'zh' ? `已将 ${moved.length} 个 key 移动到新 workspace` : `Moved ${moved.length} keys to the new workspace`)
       setSelectedIds(new Set())
       onKeysChanged?.()
       setTimeout(() => {
@@ -383,17 +415,62 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       }, 1500)
     } else if (moved.length > 0) {
       setMoveError(
-        (lang === 'vi' ? `Chuyển ${moved.length} thành công, ${failed.length} lỗi: ` : `Moved ${moved.length}, ${failed.length} failed: `) +
+        (lang === 'zh' ? `成功移动 ${moved.length} 个，${failed.length} 个失败：` : `Moved ${moved.length}, ${failed.length} failed: `) +
         failed.slice(0, 3).join('; ') + (failed.length > 3 ? '…' : '')
       )
       onKeysChanged?.()
     } else {
       setMoveError(
-        (lang === 'vi' ? `Chuyển thất bại: ` : `Move failed: `) + failed.slice(0, 3).join('; ')
+        (lang === 'zh' ? `移动失败：` : `Move failed: `) + failed.slice(0, 3).join('; ')
       )
     }
     setMoving(false)
     setMoveProgress({ current: 0, total: 0 })
+  }
+
+  async function handleBulkDelete() {
+    const targets = keys.filter(k => selectedIds.has(k.id))
+    if (targets.length === 0) return
+
+    if (!confirm(lang === 'zh'
+      ? `永久删除已选择的 ${targets.length} 个 key？`
+      : `Permanently delete ${targets.length} selected key(s)?`)) return
+
+    setBulkDeleting(true)
+    setBulkDeleteProgress({ current: 0, total: targets.length })
+
+    const deletedIds: string[] = []
+    const failed: string[] = []
+
+    for (let i = 0; i < targets.length; i++) {
+      const key = targets[i]
+      try {
+        await deleteCDKKey(key.id)
+        deletedIds.push(key.id)
+      } catch (err: any) {
+        failed.push(`${key.key} (${err?.message || 'error'})`)
+      }
+      setBulkDeleteProgress({ current: i + 1, total: targets.length })
+      if (i < targets.length - 1) await new Promise(r => setTimeout(r, 40))
+    }
+
+    if (failed.length === 0) {
+      onKeysChanged?.()
+    } else {
+      alert((lang === 'zh' ? `已删除 ${deletedIds.length} 个，${failed.length} 个失败：` : `Deleted ${deletedIds.length}, ${failed.length} failed: `) +
+        failed.slice(0, 5).join('; ') + (failed.length > 5 ? '…' : ''))
+      onKeysChanged?.()
+    }
+
+    setKeys(prev => removeItemsById(prev, deletedIds))
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      for (const id of deletedIds) next.delete(id)
+      return next
+    })
+    setShowDeleteConfirm(prev => prev && deletedIds.includes(prev) ? null : prev)
+    setBulkDeleting(false)
+    setBulkDeleteProgress({ current: 0, total: 0 })
   }
 
   async function handleToggleStatus(key: CDKKey) {
@@ -429,8 +506,8 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     const targets = bulkResults.filter(r => r.found && r.status === 'live' && r.id)
     if (targets.length === 0) return
 
-    if (!confirm(lang === 'vi'
-      ? `Vô hiệu hóa ${targets.length} key chưa sử dụng?`
+    if (!confirm(lang === 'zh'
+      ? `禁用 ${targets.length} 个未使用的 key？`
       : `Disable ${targets.length} unactivated key(s)?`)) return
 
     setBulkDisabling(true)
@@ -458,9 +535,9 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     }
 
     if (failed.length === 0) {
-      alert(lang === 'vi' ? `Đã vô hiệu hóa ${disabledIds.length} key` : `Disabled ${disabledIds.length} key(s)`)
+      alert(lang === 'zh' ? `已禁用 ${disabledIds.length} 个 key` : `Disabled ${disabledIds.length} key(s)`)
     } else {
-      alert((lang === 'vi' ? `Đã vô hiệu hóa ${disabledIds.length}, ${failed.length} lỗi: ` : `Disabled ${disabledIds.length}, ${failed.length} failed: `) +
+      alert((lang === 'zh' ? `已禁用 ${disabledIds.length} 个，${failed.length} 个失败：` : `Disabled ${disabledIds.length}, ${failed.length} failed: `) +
         failed.slice(0, 5).join('; ') + (failed.length > 5 ? '…' : ''))
     }
     onKeysChanged?.()
@@ -474,47 +551,54 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
     used: keys.filter(k => k.status === 'used').length,
     disabled: keys.filter(k => k.status === 'disabled').length,
   }
+  const pageCount = getPageCount(filtered.length, pageSize)
+  const currentPage = clampPage(page, filtered.length, pageSize)
+  const pagedKeys = getPageItems(filtered, currentPage, pageSize)
+  const pageRange = getPageRange(filtered.length, currentPage, pageSize)
+  const selectedKeys = keys.filter(k => selectedIds.has(k.id))
+  const selectedLiveCount = selectedKeys.filter(k => k.status === 'live').length
+  const currentPageSelected = pagedKeys.length > 0 && pagedKeys.every(k => selectedIds.has(k.id))
 
   const labels = {
-    vi: {
-      title: 'Quản lý CDK Keys',
-      tabAll: 'Tất cả',
-      tabLive: 'Chưa dùng',
-      tabUsed: 'Đã dùng',
-      tabDisabled: 'Vô hiệu',
-      search: 'Tìm kiếm key hoặc email...',
-      create: 'Tạo Key mới',
-      createTitle: 'Tạo CDK Key',
-      createSingle: 'Tạo đơn',
-      createBulk: 'Tạo hàng loạt',
+    zh: {
+      title: 'CDK Key 管理',
+      tabAll: '全部',
+      tabLive: '未使用',
+      tabUsed: '已使用',
+      tabDisabled: '已禁用',
+      search: '搜索 key 或邮箱...',
+      create: '新建 Key',
+      createTitle: '新建 CDK Key',
+      createSingle: '单个创建',
+      createBulk: '批量创建',
       keyLabel: 'CDK Key',
       wsLabel: 'Workspace ID',
-      keyPlaceholder: 'VD: ABCD-1234-EFGH',
-      bulkPlaceholder: 'Mỗi dòng 1 key',
-      createBtn: 'Tạo ngay',
-      cancel: 'Hủy',
-      delete: 'Xóa',
-      copied: 'Đã sao chép!',
-      copy: 'Sao chép',
-      disable: 'Vô hiệu hóa',
-      enable: 'Kích hoạt lại',
-      noKeys: 'Chưa có key nào.',
-      noWorkspaces: 'Chưa có workspace nào — vào tab Workspaces để tạo',
+      keyPlaceholder: '例如：ABCD-1234-EFGH',
+      bulkPlaceholder: '每行一个 key',
+      createBtn: '立即创建',
+      cancel: '取消',
+      delete: '删除',
+      copied: '已复制！',
+      copy: '复制',
+      disable: '禁用',
+      enable: '重新启用',
+      noKeys: '暂无 key。',
+      noWorkspaces: '暂无 workspace，请到 Workspaces 标签页创建',
       keyCol: 'CDK Key',
       wsCol: 'Workspace ID',
-      statusCol: 'Trạng thái',
-      createdCol: 'Ngày tạo',
+      statusCol: '状态',
+      createdCol: '创建时间',
       emailCol: 'Email',
-      actionsCol: 'Hành động',
+      actionsCol: '操作',
       notUsed: '—',
-      bulkCheck: 'Kiểm tra hàng loạt',
-      checkResult: 'Kết quả kiểm tra',
-      bulkInput: 'Dán danh sách key (mỗi dòng 1 key)',
-      check: 'Kiểm tra',
-      clearResults: 'Xóa kết quả',
-      notFound: 'Không tìm thấy',
-      selectWs: 'Chọn Workspace',
-      createdOk: 'Đã tạo',
+      bulkCheck: '批量检查',
+      checkResult: '检查结果',
+      bulkInput: '粘贴 key 列表（每行一个）',
+      check: '检查',
+      clearResults: '清空结果',
+      notFound: '未找到',
+      selectWs: '选择 Workspace',
+      createdOk: '已创建',
     },
     en: {
       title: 'CDK Key Management',
@@ -637,9 +721,9 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                     >
                       {bulkDisabling ? <Loader2 size={12} className="animate-spin" /> : <ToggleRight size={12} strokeWidth={2} />}
                       {bulkDisabling && bulkDisableProgress.total > 0
-                        ? (lang === 'vi' ? `Đang vô hiệu ${bulkDisableProgress.current}/${bulkDisableProgress.total}…` : `Disabling ${bulkDisableProgress.current}/${bulkDisableProgress.total}…`)
-                        : (lang === 'vi'
-                            ? `Vô hiệu hóa ${bulkResults.filter(r => r.found && r.status === 'live' && r.id).length} key chưa dùng`
+                        ? (lang === 'zh' ? `正在禁用 ${bulkDisableProgress.current}/${bulkDisableProgress.total}…` : `Disabling ${bulkDisableProgress.current}/${bulkDisableProgress.total}…`)
+                        : (lang === 'zh'
+                            ? `禁用 ${bulkResults.filter(r => r.found && r.status === 'live' && r.id).length} 个未使用 key`
                             : `Disable ${bulkResults.filter(r => r.found && r.status === 'live' && r.id).length} live key(s)`)}
                     </button>
                   )}
@@ -675,7 +759,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                       r.status === 'disabled' ? 'text-red-400' :
                       'text-yellow-400'
                     }`}>
-                      {r.status === 'not_found' ? t.notFound : STATUS_LABELS[r.status as keyof typeof STATUS_LABELS]?.[lang === 'vi' ? 'vi' : 'en']}
+                      {r.status === 'not_found' ? t.notFound : STATUS_LABELS[r.status as keyof typeof STATUS_LABELS]?.[lang === 'zh' ? 'zh' : 'en']}
                     </span>
                   </div>
                 </div>
@@ -727,26 +811,48 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
           <div className="flex items-center gap-2 text-xs text-indigo-200">
             <Check size={14} strokeWidth={2} />
             <span className="font-semibold">
-              {lang === 'vi'
-                ? `Đã chọn ${selectedIds.size} key (chỉ những key chưa kích hoạt mới chuyển được)`
-                : `${selectedIds.size} key(s) selected (only unactivated keys can be moved)`}
+              {lang === 'zh'
+                ? `已选择 ${selectedIds.size} 个 key（${selectedLiveCount} 个未激活 key 可移动）`
+                : `${selectedIds.size} key(s) selected (${selectedLiveCount} live movable)`}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={clearSelection}
-              disabled={moving}
+              disabled={moving || bulkDeleting}
               className="text-xs px-3 py-1.5 rounded-lg bg-[#22253a] border border-[#2a2d3a] text-slate-300 hover:text-slate-100 transition-colors disabled:opacity-50"
             >
-              {lang === 'vi' ? 'Bỏ chọn' : 'Clear'}
+              {lang === 'zh' ? '取消选择' : 'Clear'}
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting || moving}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-300 hover:bg-red-500/30 font-semibold transition-colors disabled:opacity-50"
+            >
+              <span className="relative h-3 w-3 flex-shrink-0">
+                <Loader2
+                  size={12}
+                  className={`absolute inset-0 transition-opacity ${bulkDeleting ? 'opacity-100 animate-spin' : 'opacity-0'}`}
+                />
+                <Trash2
+                  size={12}
+                  strokeWidth={2}
+                  className={`absolute inset-0 transition-opacity ${bulkDeleting ? 'opacity-0' : 'opacity-100'}`}
+                />
+              </span>
+              {bulkDeleting && bulkDeleteProgress.total > 0
+                ? (lang === 'zh'
+                    ? `正在删除 ${bulkDeleteProgress.current}/${bulkDeleteProgress.total}…`
+                    : `Deleting ${bulkDeleteProgress.current}/${bulkDeleteProgress.total}…`)
+                : (lang === 'zh' ? '删除已选' : 'Delete selected')}
             </button>
             <button
               onClick={openMoveModal}
-              disabled={moving}
+              disabled={moving || bulkDeleting || selectedLiveCount === 0}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white font-semibold transition-colors disabled:opacity-50"
             >
               <ArrowRightLeft size={12} strokeWidth={2} />
-              {lang === 'vi' ? 'Chuyển workspace' : 'Move workspace'}
+              {lang === 'zh' ? `移动 live (${selectedLiveCount})` : `Move live (${selectedLiveCount})`}
             </button>
           </div>
         </div>
@@ -767,10 +873,10 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                 <div className="flex items-center justify-center">
                   <input
                     type="checkbox"
-                    checked={filtered.length > 0 && filtered.every(k => selectedIds.has(k.id))}
-                    onChange={e => e.target.checked ? selectAllLive() : clearSelection()}
+                    checked={currentPageSelected}
+                    onChange={e => e.target.checked ? selectCurrentPage() : clearCurrentPageSelection()}
                     className="accent-indigo-500 cursor-pointer"
-                    title={lang === 'vi' ? 'Chọn tất cả key live (chưa kích hoạt)' : 'Select all live (unactivated) keys'}
+                    title={lang === 'zh' ? '选择本页所有 key' : 'Select all keys on this page'}
                   />
                 </div>
                 <div>{t.keyCol}</div>
@@ -782,7 +888,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
               </div>
 
               {/* Rows */}
-              {filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(key => (
+              {pagedKeys.map(key => (
                 <div
                   key={key.id}
                   className="grid gap-2 items-center px-3 py-2.5 bg-[#1a1d27] rounded-lg hover:bg-[#22253a] transition-colors group"
@@ -793,12 +899,9 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                     <input
                       type="checkbox"
                       checked={selectedIds.has(key.id)}
-                      disabled={key.status !== 'live'}
                       onChange={() => toggleSelect(key.id)}
-                      className="accent-indigo-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                      title={key.status === 'live'
-                        ? (lang === 'vi' ? 'Chọn để chuyển workspace' : 'Select to move workspace')
-                        : (lang === 'vi' ? 'Chỉ key chưa kích hoạt mới chuyển được' : 'Only unactivated keys can be moved')}
+                      className="accent-indigo-500 cursor-pointer"
+                      title={lang === 'zh' ? '选择 key' : 'Select key'}
                     />
                   </div>
 
@@ -826,7 +929,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                   {/* Status */}
                   <div>
                     <span className={`text-xs font-semibold ${STATUS_LABELS[key.status].color}`}>
-                      {STATUS_LABELS[key.status].vi}
+                      {STATUS_LABELS[key.status].zh}
                     </span>
                   </div>
 
@@ -890,33 +993,52 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
       )}
 
       {/* Pagination */}
-      {!bulkMode && filtered.length > PAGE_SIZE && (
-        <div className="flex items-center justify-between pt-2">
+      {!bulkMode && filtered.length > 0 && (
+        <div className="flex items-center justify-between gap-3 pt-2 flex-wrap">
           <p className="text-[11px] text-slate-500">
-            {lang === 'vi'
-              ? `Hiển thị ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, filtered.length)} / ${filtered.length}`
-              : `Showing ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, filtered.length)} of ${filtered.length}`}
+            {lang === 'zh'
+              ? `显示 ${pageRange.start}–${pageRange.end} / ${filtered.length}`
+              : `Showing ${pageRange.start}–${pageRange.end} of ${filtered.length}`}
           </p>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              className="text-xs px-3 py-1.5 rounded-lg bg-[#22253a] border border-[#2a2d3a] text-slate-300 hover:text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {lang === 'vi' ? 'Trước' : 'Prev'}
-            </button>
-            <span className="text-[11px] text-slate-500 px-2">
-              {page} / {Math.ceil(filtered.length / PAGE_SIZE)}
-            </span>
-            <button
-              type="button"
-              onClick={() => setPage(p => Math.min(Math.ceil(filtered.length / PAGE_SIZE), p + 1))}
-              disabled={page >= Math.ceil(filtered.length / PAGE_SIZE)}
-              className="text-xs px-3 py-1.5 rounded-lg bg-[#22253a] border border-[#2a2d3a] text-slate-300 hover:text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {lang === 'vi' ? 'Sau' : 'Next'}
-            </button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-[#22253a] border border-[#2a2d3a] rounded-lg p-1">
+              <span className="text-[10px] text-slate-500 px-1">{lang === 'zh' ? '每页' : 'Per page'}</span>
+              {PAGE_SIZE_OPTIONS.map(size => (
+                <button
+                  key={size}
+                  type="button"
+                  onClick={() => setPageSize(size)}
+                  className={`text-[11px] px-2 py-1 rounded-md font-semibold transition-colors ${
+                    pageSize === size
+                      ? 'bg-indigo-500 text-white'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {size}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="text-xs px-3 py-1.5 rounded-lg bg-[#22253a] border border-[#2a2d3a] text-slate-300 hover:text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {lang === 'zh' ? '上一页' : 'Prev'}
+              </button>
+              <span className="text-[11px] text-slate-500 px-2">
+                {currentPage} / {pageCount}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.min(pageCount, p + 1))}
+                disabled={currentPage >= pageCount}
+                className="text-xs px-3 py-1.5 rounded-lg bg-[#22253a] border border-[#2a2d3a] text-slate-300 hover:text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {lang === 'zh' ? '下一页' : 'Next'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -979,7 +1101,16 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                   disabled={!newKeyKey.trim() || !newKeyWs.trim() || creating}
                   className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-bold text-sm py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  <span className="relative h-3.5 w-3.5 flex-shrink-0">
+                    <Loader2
+                      size={14}
+                      className={`absolute inset-0 transition-opacity ${creating ? 'opacity-100 animate-spin' : 'opacity-0'}`}
+                    />
+                    <Plus
+                      size={14}
+                      className={`absolute inset-0 transition-opacity ${creating ? 'opacity-0' : 'opacity-100'}`}
+                    />
+                  </span>
                   {t.createBtn}
                 </button>
                 {createError && (
@@ -1020,10 +1151,19 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
                   disabled={!bulkInput.trim() || !bulkWsId.trim() || creating}
                   className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-bold text-sm py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  <span className="relative h-3.5 w-3.5 flex-shrink-0">
+                    <Loader2
+                      size={14}
+                      className={`absolute inset-0 transition-opacity ${creating ? 'opacity-100 animate-spin' : 'opacity-0'}`}
+                    />
+                    <Plus
+                      size={14}
+                      className={`absolute inset-0 transition-opacity ${creating ? 'opacity-0' : 'opacity-100'}`}
+                    />
+                  </span>
                   {creating && bulkProgress.total > 0
-                    ? (lang === 'vi'
-                        ? `Đang tạo ${bulkProgress.current}/${bulkProgress.total}…`
+                    ? (lang === 'zh'
+                        ? `正在创建 ${bulkProgress.current}/${bulkProgress.total}…`
                         : `Creating ${bulkProgress.current}/${bulkProgress.total}…`)
                     : `${t.createBtn} (${bulkInput.split('\n').filter(Boolean).length})`}
                 </button>
@@ -1061,7 +1201,7 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
               <div className="flex items-center gap-2">
                 <ArrowRightLeft size={16} strokeWidth={2} className="text-indigo-400" />
                 <h3 className="text-sm font-bold text-slate-100">
-                  {lang === 'vi' ? 'Chuyển key sang workspace khác' : 'Move keys to another workspace'}
+                  {lang === 'zh' ? '移动 key 到其他 workspace' : 'Move keys to another workspace'}
                 </h3>
               </div>
               <button
@@ -1074,8 +1214,8 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
             </div>
 
             <p className="text-xs text-slate-400 mb-4">
-              {lang === 'vi'
-                ? `Workspace cũ có thể đã die. Chọn workspace mới để chuyển ${keys.filter(k => selectedIds.has(k.id) && k.status === 'live').length} key chưa kích hoạt.`
+              {lang === 'zh'
+                ? `旧 workspace 可能已失效。选择新的 workspace 来移动 ${keys.filter(k => selectedIds.has(k.id) && k.status === 'live').length} 个未激活 key。`
                 : `The old workspace may have died. Pick a new workspace for the ${keys.filter(k => selectedIds.has(k.id) && k.status === 'live').length} unactivated key(s).`}
             </p>
 
@@ -1097,10 +1237,10 @@ export default function CDKKeyManager({ lang, onKeysChanged }: CDKKeyManagerProp
             >
               {moving ? <Loader2 size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
               {moving && moveProgress.total > 0
-                ? (lang === 'vi'
-                    ? `Đang chuyển ${moveProgress.current}/${moveProgress.total}…`
+                ? (lang === 'zh'
+                    ? `正在移动 ${moveProgress.current}/${moveProgress.total}…`
                     : `Moving ${moveProgress.current}/${moveProgress.total}…`)
-                : (lang === 'vi' ? 'Chuyển workspace' : 'Move workspace')}
+                : (lang === 'zh' ? '移动 workspace' : 'Move workspace')}
             </button>
             {moving && moveProgress.total > 0 && (
               <div className="w-full bg-[#22253a] rounded-full h-2 overflow-hidden mt-3">

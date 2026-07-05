@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { Clipboard, ChevronDown, ChevronUp, ArrowLeft, ArrowRight, User, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 
 interface StepSessionProps {
-  lang: 'vi' | 'en'
+  lang: 'zh' | 'en'
   onNext: (data: any) => void
   onBack: () => void
 }
@@ -26,30 +26,30 @@ export default function StepSession({ lang, onNext, onBack }: StepSessionProps) 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const labels = {
-    vi: {
-      title: 'Xác thực tài khoản',
-      subtitle: 'Bước 2 trong 3',
-      placeholder: 'Dán dữ liệu AuthSession từ ChatGPT vào đây...',
-      next: 'Tiếp tục',
-      back: 'Quay lại',
-      guideTitle: 'Hướng dẫn lấy AuthSession',
-      step1: 'Đăng nhập ChatGPT',
-      step1Desc: 'Mở một tab mới, truy cập và đăng nhập tài khoản ChatGPT của bạn.',
-      step2: 'Lấy dữ liệu AuthSession',
-      step2Desc: 'Truy cập đường dẫn bên dưới, sao chép (Copy) toàn bộ nội dung hiển thị.',
-      step3: 'Hoàn thành kích hoạt',
-      step3Desc: 'Quay lại đây, dán dữ liệu vừa sao chép vào ô bên dưới.',
-      note: 'Lưu ý',
-      noteDesc: 'Nếu trạng thái tài khoản chưa đổi sau khi kích hoạt thành công, hãy tải lại trang ChatGPT vài lần.',
-      copyLink: 'Sao chép',
-      copied: 'Đã sao chép!',
-      errorInvalid: 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại.',
-      errorToken: 'Không tìm thấy accessToken trong dữ liệu.',
-      userInfo: 'Thông tin tài khoản',
+    zh: {
+      title: '验证账号',
+      subtitle: '第 2 步，共 3 步',
+      placeholder: '在这里粘贴 ChatGPT 的 AuthSession 数据...',
+      next: '继续',
+      back: '返回',
+      guideTitle: '获取 AuthSession 指引',
+      step1: '登录 ChatGPT',
+      step1Desc: '打开新标签页，访问并登录你的 ChatGPT 账号。',
+      step2: '获取 AuthSession 数据',
+      step2Desc: '访问下面的链接，复制页面显示的全部内容。',
+      step3: '完成激活',
+      step3Desc: '回到这里，将刚复制的数据粘贴到下方输入框。',
+      note: '注意',
+      noteDesc: '如果激活成功后账号状态没有变化，请刷新几次 ChatGPT 页面。',
+      copyLink: '复制',
+      copied: '已复制！',
+      errorInvalid: '数据无效，请检查后重试。',
+      errorToken: '数据中未找到 accessToken。',
+      userInfo: '账号信息',
       email: 'Email',
-      name: 'Tên',
-      plan: 'Loại tài khoản',
-      expires: 'Hết hạn',
+      name: '名称',
+      plan: '账号类型',
+      expires: '过期时间',
     },
     en: {
       title: 'Account Verification',
@@ -129,7 +129,7 @@ export default function StepSession({ lang, onNext, onBack }: StepSessionProps) 
   function formatExpiry(expires: number) {
     if (!expires) return '—'
     const d = new Date(expires * 1000)
-    return d.toLocaleString('vi-VN')
+    return d.toLocaleString('zh-CN')
   }
 
   function getPlanLabel(planType: string) {
@@ -258,7 +258,7 @@ export default function StepSession({ lang, onNext, onBack }: StepSessionProps) 
           {parsing && (
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <Loader2 size={12} className="animate-spin" />
-              Đang phân tích...
+              正在解析...
             </div>
           )}
           {error && (

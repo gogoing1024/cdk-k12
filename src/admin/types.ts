@@ -58,7 +58,7 @@ export function generateUUID(): string {
 
 // Format timestamp to readable date
 export function formatDate(timestamp: number): string {
-  return new Date(timestamp).toLocaleString('vi-VN', {
+  return new Date(timestamp).toLocaleString('zh-CN', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -68,19 +68,19 @@ export function formatDate(timestamp: number): string {
 }
 
 // Status label helpers
-export const STATUS_LABELS: Record<CDKStatus, { vi: string; en: string; color: string }> = {
+export const STATUS_LABELS: Record<CDKStatus, { zh: string; en: string; color: string }> = {
   live: {
-    vi: 'Chưa sử dụng',
+    zh: '未使用',
     en: 'Live',
     color: 'text-emerald-400',
   },
   used: {
-    vi: 'Đã sử dụng',
+    zh: '已使用',
     en: 'Used',
     color: 'text-slate-400',
   },
   disabled: {
-    vi: 'Vô hiệu hóa',
+    zh: '已禁用',
     en: 'Disabled',
     color: 'text-red-400',
   },

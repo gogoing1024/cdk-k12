@@ -2,7 +2,7 @@
 
 ## 1. Concept & Vision
 
-A sleek, localized Vietnamese CDK activation portal that lets users manually input their ChatGPT `AuthSession` JSON data (instead of auto-fetching from the browser). The UI mimics a modern fintech activation flow — three focused steps, progress-driven, with clear feedback at every stage. Feels premium, fast, and trustworthy.
+A sleek, localized Chinese CDK activation portal that lets users manually input their ChatGPT `AuthSession` JSON data (instead of auto-fetching from the browser). The UI mimics a modern fintech activation flow — three focused steps, progress-driven, with clear feedback at every stage. Feels premium, fast, and trustworthy.
 
 ## 2. Design Language
 
@@ -49,14 +49,14 @@ Single-page, centered card (max-width 480px), vertically centered on viewport.
 
 ### Step 1 — CDK Key Verification
 - Single text input for the CDK key
-- "Xác thực mã" button
+- "验证 CDK" button
 - On valid key → advance to Step 2
 - On invalid key → shake animation + red border + error message
 - Key stored in component state (not persisted)
 
 ### Step 2 — AuthSession Input
 - Large textarea for pasting JSON from `chatgpt.com/api/auth/session`
-- "Kiểm tra dữ liệu" button validates JSON structure
+- "检查数据" button validates JSON structure
 - Displays parsed user info: email, account_id, plan_type, expiry
 - On valid data → advance to Step 3
 - On invalid JSON → error message
@@ -64,10 +64,10 @@ Single-page, centered card (max-width 480px), vertically centered on viewport.
 
 ### Step 3 — Premium Activation
 - Shows confirmed user info from Step 2
-- "Bắt đầu kích hoạt" button triggers activation
+- "开始激活" button triggers activation
 - Calls `https://chatgpt.com/backend-api/accounts/{account_id}/subscription` with Bearer token
 - Loading state with spinner
-- Success state: green checkmark + "Kích hoạt thành công!" message
+- Success state: green checkmark + "激活成功！" message
 - Error state: red message with error details
 - Instructions about reloading ChatGPT after activation
 
@@ -86,13 +86,13 @@ Single-page, centered card (max-width 480px), vertically centered on viewport.
 - States: default, focused (indigo border + glow), error (red border + shake), success
 
 ### SessionInput (Step 2)
-- Card with instructions panel (collapsible "Hướng dẫn lấy AuthSession")
+- Card with instructions panel (collapsible "获取 AuthSession 指引")
 - Large textarea (min 200px height)
 - User info preview card (shows parsed data with green border when valid)
 
 ### ActivationPanel (Step 3)
 - Confirmation card showing account info
-- Large "Bắt đầu kích hoạt" button (indigo gradient, hover glow)
+- Large "开始激活" button (indigo gradient, hover glow)
 - Loading spinner (indigo rotating ring)
 - Result display: success checkmark animation or error message
 

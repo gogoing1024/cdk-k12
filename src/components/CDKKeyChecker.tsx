@@ -4,7 +4,7 @@ import { checkCDKKeyStatus } from '../admin/db'
 import { STATUS_LABELS } from '../admin/types'
 
 interface CDKKeyCheckerProps {
-  lang: 'vi' | 'en'
+  lang: 'zh' | 'en'
   onClose: () => void
 }
 
@@ -14,14 +14,14 @@ export default function CDKKeyChecker({ lang, onClose }: CDKKeyCheckerProps) {
   const [checking, setChecking] = useState(false)
 
   const labels = {
-    vi: {
-      title: 'Kiểm tra CDK Key',
-      placeholder: 'Nhập 1 hoặc nhiều key (mỗi dòng 1 key)',
-      check: 'Kiểm tra',
-      checking: 'Đang kiểm tra...',
-      notFound: 'Không tìm thấy trong hệ thống',
-      success: 'Kích hoạt thành công',
-      noResults: 'Chưa có kết quả. Nhập key và bấm Kiểm tra.',
+    zh: {
+      title: '检查 CDK Key',
+      placeholder: '输入一个或多个 key（每行一个）',
+      check: '检查',
+      checking: '正在检查...',
+      notFound: '系统中未找到',
+      success: '激活成功',
+      noResults: '暂无结果。输入 key 后点击检查。',
     },
     en: {
       title: 'Check CDK Key',
@@ -135,13 +135,13 @@ export default function CDKKeyChecker({ lang, onClose }: CDKKeyCheckerProps) {
                   </div>
                   <div className="flex-shrink-0 text-right">
                     {r.status === 'live' && (
-                      <span className="text-xs font-bold text-emerald-400">{STATUS_LABELS.live.vi}</span>
+                      <span className="text-xs font-bold text-emerald-400">{STATUS_LABELS.live[lang === 'zh' ? 'zh' : 'en']}</span>
                     )}
                     {r.status === 'used' && (
-                      <span className="text-xs font-bold text-slate-400">{STATUS_LABELS.used.vi}</span>
+                      <span className="text-xs font-bold text-slate-400">{STATUS_LABELS.used[lang === 'zh' ? 'zh' : 'en']}</span>
                     )}
                     {r.status === 'disabled' && (
-                      <span className="text-xs font-bold text-red-400">{STATUS_LABELS.disabled.vi}</span>
+                      <span className="text-xs font-bold text-red-400">{STATUS_LABELS.disabled[lang === 'zh' ? 'zh' : 'en']}</span>
                     )}
                     {!r.found && (
                       <span className="text-xs font-bold text-yellow-400">{t.notFound}</span>

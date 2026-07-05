@@ -4,7 +4,7 @@ import CDKKeyChecker from './CDKKeyChecker'
 import { checkCDKKeyStatus } from '../admin/db'
 
 interface StepCDKProps {
-  lang: 'vi' | 'en'
+  lang: 'zh' | 'en'
   onNext: (key: string) => void
 }
 
@@ -21,19 +21,19 @@ export default function StepCDK({ lang, onNext }: StepCDKProps) {
   const lastCheckedRef = useRef<string>('')
 
   const labels = {
-    vi: {
-      title: 'Nhập mã CDK',
-      subtitle: 'Bước 1 trong 3',
-      desc: 'Nhập mã CDK của bạn để bắt đầu kích hoạt Plus.',
-      placeholder: 'VD: ABCD-1234-EFGH',
-      checkKey: 'Kiểm tra Key',
-      next: 'Tiếp tục',
-      checking: 'Đang kiểm tra...',
-      statusUsed: 'Mã này đã được sử dụng.',
-      statusDisabled: 'Mã này đã bị vô hiệu hóa.',
-      statusNotFound: 'Mã CDK không tìm thấy trong hệ thống.',
-      statusValid: 'Mã hợp lệ - sẵn sàng kích hoạt.',
-      error: 'Mã CDK phải có ít nhất 4 ký tự.',
+    zh: {
+      title: '输入 CDK',
+      subtitle: '第 1 步，共 3 步',
+      desc: '输入你的 CDK，开始激活 Plus。',
+      placeholder: '例如：ABCD-1234-EFGH',
+      checkKey: '检查 Key',
+      next: '继续',
+      checking: '正在检查...',
+      statusUsed: '该 CDK 已被使用。',
+      statusDisabled: '该 CDK 已被禁用。',
+      statusNotFound: '系统中未找到该 CDK。',
+      statusValid: 'CDK 有效，可以激活。',
+      error: 'CDK 至少需要 4 个字符。',
     },
     en: {
       title: 'Enter CDK Code',

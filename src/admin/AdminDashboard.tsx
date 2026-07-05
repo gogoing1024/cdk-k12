@@ -5,7 +5,7 @@ import WorkspaceManager from './WorkspaceManager'
 import { getCDKKeys, getWorkspaces, logoutAdmin } from './db'
 
 interface AdminDashboardProps {
-  lang: 'vi' | 'en'
+  lang: 'zh' | 'en'
   onLogout: () => void
 }
 
@@ -32,16 +32,16 @@ export default function AdminDashboard({ lang, onLogout }: AdminDashboardProps) 
   }, [refresh])
 
   const labels = {
-    vi: {
+    zh: {
       title: 'Admin Dashboard',
-      subtitle: 'Hệ thống quản lý CDK K12',
-      tabKeys: 'Quản lý Keys',
-      tabWorkspaces: 'Quản lý Workspaces',
-      logout: 'Đăng xuất',
-      totalKeys: 'Tổng Keys',
-      liveKeys: 'Chưa dùng',
-      usedKeys: 'Đã dùng',
-      disabledKeys: 'Vô hiệu',
+      subtitle: 'CDK K12 管理系统',
+      tabKeys: 'Key 管理',
+      tabWorkspaces: 'Workspace 管理',
+      logout: '退出登录',
+      totalKeys: 'Key 总数',
+      liveKeys: '未使用',
+      usedKeys: '已使用',
+      disabledKeys: '已禁用',
       workspaces: 'Workspaces',
     },
     en: {
